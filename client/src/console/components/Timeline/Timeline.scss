@@ -1,0 +1,11 @@
+// Anchored to the bottom: a transcript is read from its newest end, and the
+// overflow that results is history scrolling off the top, which is correct.
+.tc-timeline {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 10px var(--tc-pad) 8px;
+}

@@ -1,0 +1,58 @@
+// Console — the one source of colour, type and spacing.
+//
+// Everything is a CSS custom property rather than a Sass variable on purpose:
+// components read them at runtime, so a host app can restyle the system without
+// recompiling it, and the terminal keeps its own ground in any theme.
+
+:root {
+  // Ground. Graphite rather than black: near-black smears at text edges on OLED
+  // and leaves the drawer with nothing to separate itself from.
+  --tc-bg: #14171c;
+  --tc-surface: #191d24;
+  --tc-surface-2: #21262e;
+  --tc-surface-3: #292f38;
+
+  // Ink. --tc-ink-3 is the mono-label tone and sits at 4.5:1 on --tc-surface,
+  // exactly on the AA line for small text. Lighten it before darkening the ground.
+  --tc-ink: #e6eaf2;
+  --tc-ink-2: #a9b1c0;
+  --tc-ink-3: #7c8594;
+
+  // Hairlines. --tc-rule draws the trunk and the elbows; --tc-rule-2 is for
+  // anything that needs to read as an edge rather than a connection.
+  --tc-rule: #2b3038;
+  --tc-rule-2: #39404a;
+
+  // The one accent. Anything the user acts on is this colour, and nothing else is.
+  --tc-accent: #4c9aff;
+  --tc-accent-ink: #06101f;
+
+  // Semantic state. Separate from the accent by design: an agent finishing is
+  // not an invitation to tap.
+  --tc-ok: #3ddc97;
+  --tc-working: #ffc14d;
+  --tc-attn: #ff5c8a;
+
+  // The pane keeps its own ground in every theme — the app is the app, the
+  // terminal is a window into a machine.
+  --tc-term-bg: #090c11;
+  --tc-term-fg: #d6ddea;
+  --tc-term-dim: #5f6a7d;
+  --tc-term-chrome: #161f2c;
+
+  --tc-font: "Geist", system-ui, -apple-system, sans-serif;
+  --tc-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+
+  // Radii. Curves carry structure and state; controls are rectangles, because a
+  // pill reads as a tag rather than as something you press.
+  --tc-r-control: 8px;
+  --tc-r-chip: 6px;
+  --tc-r-drawer: 18px;
+  --tc-r-elbow: 11px;
+
+  // The rail. --tc-gutter is the mono column every screen aligns to; the trunk
+  // sits at its centre so glyphs punch out of the line.
+  --tc-gutter: 46px;
+  --tc-gutter-gap: 12px;
+  --tc-pad: 18px;
+}

@@ -1,0 +1,13 @@
+old
+docs
+.env.local
+.env
+target/
+node_modules/
+client/build/
+client/.svelte-kit/
+client/src/js/bindings/
+client/src-tauri/gen/
+*.sqlite3
+relay/relay.toml
+.superpowers/

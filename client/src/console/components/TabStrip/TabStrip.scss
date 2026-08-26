@@ -1,0 +1,36 @@
+.tc-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  &__tab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    padding: 5px 11px;
+    border: 0;
+    border-radius: var(--tc-r-chip);
+    background: var(--tc-term-chrome);
+    color: var(--tc-term-dim);
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    cursor: pointer;
+
+    &.is-active {
+      background: var(--tc-accent);
+      color: var(--tc-accent-ink);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-term-fg);
+      outline-offset: 2px;
+    }
+  }
+}

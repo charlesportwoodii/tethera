@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Capabilities the main window holds on Android and iOS only.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

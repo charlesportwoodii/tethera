@@ -1,0 +1,17 @@
+[package]
+name = "tethera-migration"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+name = "tethera_migration"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tethera-migration"
+path = "src/main.rs"
+
+[dependencies]
+sea-orm-migration = { workspace = true, features = ["cli"] }
+tokio = { workspace = true }

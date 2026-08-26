@@ -1,0 +1,78 @@
+@use "../../tokens/mixins" as *;
+
+.tc-glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+
+  i {
+    display: block;
+  }
+
+  // Working: an arc sweeping a ring. Round means the machine is dealing with it.
+  &.is-working i {
+    width: 86%;
+    height: 86%;
+    border-radius: 50%;
+    border: 1.5px solid var(--tc-rule-2);
+    border-top-color: var(--tc-working);
+    animation: tc-glyph-spin 1.5s linear infinite;
+  }
+
+  // Blocked: the one angular mark in the system. Angular means you are the blocker.
+  &.is-blocked i {
+    width: 0;
+    height: 0;
+    border-left: 0.43em solid transparent;
+    border-right: 0.43em solid transparent;
+    border-bottom: 0.71em solid var(--tc-attn);
+  }
+
+  &.is-idle i {
+    width: 64%;
+    height: 64%;
+    border-radius: 50%;
+    border: 1.5px solid var(--tc-ink-3);
+  }
+
+  &.is-done i {
+    width: 64%;
+    height: 64%;
+    border-radius: 50%;
+    background: var(--tc-ok);
+  }
+
+  &.is-offline i {
+    width: 64%;
+    height: 64%;
+    border-radius: 50%;
+    border: 1.5px dotted var(--tc-rule-2);
+  }
+
+  &.is-set i {
+    width: 64%;
+    height: 64%;
+    border-radius: 50%;
+    background: var(--tc-accent);
+  }
+
+  &.is-unset i {
+    width: 64%;
+    height: 64%;
+    border-radius: 50%;
+    border: 1.5px solid var(--tc-rule-2);
+  }
+}
+
+@keyframes tc-glyph-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@include reduced-motion {
+  .tc-glyph.is-working i {
+    animation: none;
+  }
+}

@@ -1,0 +1,38 @@
+name: Build iOS
+
+# Inert on purpose. workflow_call is what build-all.yml needs to fan out to
+# this workflow; neither trigger fires on its own. Add `push:` and
+# `pull_request:` here to enable.
+#
+# This is the only workflow that can build iOS at all: the Tauri CLI's `ios`
+# subcommand does not exist on Windows, so this cannot be reproduced on the
+# Windows runners used elsewhere in this repo's CI.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          target: aarch64-apple-ios
+
+      - run: mise trust --all
+      - run: mise run deps
+      - run: mise run frontend
+      - run: cd client && yarn tauri ios build --debug --ci
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tethera-ios-debug
+          path: client/src-tauri/gen/apple/build/**/*.ipa
+          if-no-files-found: warn
+
+      # Enable by adding App Store Connect API key credentials as secrets
+      # and a TestFlight upload step (e.g. apple-actions/upload-testflight-build) above.
+      - name: Upload to TestFlight
+        if: false
+        run: echo "TestFlight upload not wired up yet"

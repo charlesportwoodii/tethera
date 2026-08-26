@@ -1,0 +1,67 @@
+.tc-composer {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 16px 12px;
+
+  &__attach {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    background: none;
+    color: var(--tc-ink-3);
+    flex: none;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+  }
+
+  &__field {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--tc-mono);
+    font-size: 12px;
+    color: var(--tc-ink);
+    background: var(--tc-surface-2);
+    border: 0;
+    border-radius: var(--tc-r-control);
+    padding: 11px 12px;
+
+    &::placeholder {
+      color: var(--tc-ink-3);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-accent);
+      outline-offset: -1px;
+    }
+  }
+
+  &__send {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--tc-r-control);
+    background: var(--tc-accent);
+    color: var(--tc-accent-ink);
+    flex: none;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+  }
+}

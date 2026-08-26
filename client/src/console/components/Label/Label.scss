@@ -1,0 +1,18 @@
+@use "../../tokens/mixins" as *;
+
+.tc-label {
+  @include mono-label(9px, 0.18em);
+  display: block;
+
+  &.is-section {
+    padding: 20px var(--tc-pad) 6px calc(var(--tc-gutter) - 20px);
+  }
+
+  &.is-section.is-flush {
+    padding-left: var(--tc-pad);
+  }
+
+  &.is-field {
+    margin-bottom: 1px;
+  }
+}

@@ -1,0 +1,35 @@
+// Shared fragments. Kept deliberately small — a mixin that hides a token is
+// worse than repeating the token.
+
+// The mono label voice: section words, field names, ids, figures.
+@mixin mono-label($size: 9px, $tracking: 0.18em) {
+  font-family: var(--tc-mono);
+  font-size: $size;
+  letter-spacing: $tracking;
+  text-transform: uppercase;
+  color: var(--tc-ink-3);
+}
+
+// One line, clipped rather than wrapped. Used wherever a path or a title shares
+// a row with a figure that must stay visible.
+@mixin truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// A glyph sitting on the rail: the background punches the trunk out behind it so
+// the line appears to pass under the mark.
+@mixin on-rail($bg: var(--tc-surface)) {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  background: $bg;
+  z-index: 2;
+}
+
+@mixin reduced-motion {
+  @media (prefers-reduced-motion: reduce) {
+    @content;
+  }
+}

@@ -1,0 +1,70 @@
+name: Build all
+
+# Inert on purpose. Add `push:` and `pull_request:` here to enable.
+on:
+  workflow_dispatch:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      common: ${{ steps.filter.outputs.common }}
+      transport: ${{ steps.filter.outputs.transport }}
+      server: ${{ steps.filter.outputs.server }}
+      relay: ${{ steps.filter.outputs.relay }}
+      client: ${{ steps.filter.outputs.client }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            common:
+              - 'common/**'
+            transport:
+              - 'transport/**'
+            server:
+              - 'server/**'
+            relay:
+              - 'relay/**'
+            client:
+              - 'client/**'
+
+  tests:
+    needs: changes
+    if: |
+      needs.changes.outputs.common == 'true' ||
+      needs.changes.outputs.transport == 'true' ||
+      needs.changes.outputs.server == 'true' ||
+      needs.changes.outputs.relay == 'true' ||
+      needs.changes.outputs.client == 'true'
+    uses: ./.github/workflows/tests.yml
+
+  build-server:
+    needs: changes
+    if: |
+      needs.changes.outputs.common == 'true' ||
+      needs.changes.outputs.transport == 'true' ||
+      needs.changes.outputs.server == 'true'
+    uses: ./.github/workflows/build-server.yml
+
+  build-relay:
+    needs: changes
+    if: |
+      needs.changes.outputs.common == 'true' ||
+      needs.changes.outputs.relay == 'true'
+    uses: ./.github/workflows/build-relay.yml
+
+  build-android:
+    needs: changes
+    if: |
+      needs.changes.outputs.common == 'true' ||
+      needs.changes.outputs.client == 'true'
+    uses: ./.github/workflows/build-android.yml
+
+  build-ios:
+    needs: changes
+    if: |
+      needs.changes.outputs.common == 'true' ||
+      needs.changes.outputs.client == 'true'
+    uses: ./.github/workflows/build-ios.yml

@@ -1,0 +1,54 @@
+.tc-file {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--tc-r-chip);
+  background: var(--tc-surface-2);
+  text-align: left;
+  cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--tc-ink);
+    outline-offset: 2px;
+  }
+
+  &__ext {
+    width: 34px;
+    height: 42px;
+    flex: none;
+    border-radius: 5px;
+    background: var(--tc-surface-3);
+    display: grid;
+    place-items: center;
+    font-family: var(--tc-mono);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--tc-ink-3);
+  }
+
+  &__meta {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__name {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--tc-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__sub {
+    display: block;
+    font-family: var(--tc-mono);
+    font-size: 10.5px;
+    color: var(--tc-ink-3);
+  }
+}

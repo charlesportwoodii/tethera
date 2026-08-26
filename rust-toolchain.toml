@@ -1,0 +1,10 @@
+# Pinned for both crates. The gateway had none, which is survivable for one
+# binary you build yourself and is not survivable once an NDK linker and an
+# Xcode toolchain are in the mix.
+[toolchain]
+channel = "stable"
+targets = [
+  "aarch64-linux-android",
+  "aarch64-apple-ios",
+  "aarch64-apple-ios-sim",
+]

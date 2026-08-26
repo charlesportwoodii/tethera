@@ -1,0 +1,43 @@
+name: Build Android
+
+# Inert on purpose. workflow_call is what build-all.yml needs to fan out to
+# this workflow; neither trigger fires on its own. Add `push:` and
+# `pull_request:` here to enable.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java 21, not a later version — the Android Gradle Plugin pins it.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          target: aarch64-linux-android
+
+      - run: mise trust --all
+      - run: mise run deps
+      - run: mise run frontend
+      - run: cd client && yarn tauri android build --apk --debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tethera-android-debug-apk
+          path: client/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+
+      # Enable by adding Play Console service-account credentials as a secret
+      # and an upload step (e.g. r0adkll/upload-google-play) above.
+      - name: Upload to Play Console
+        if: false
+        run: echo "Play upload not wired up yet"

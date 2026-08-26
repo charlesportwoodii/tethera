@@ -1,0 +1,86 @@
+.tc-turn {
+  display: grid;
+  grid-template-columns: var(--tc-gutter) 1fr;
+  gap: var(--tc-gutter-gap);
+  position: relative;
+
+  // The hairline runs the length of the turn rather than between turns, which is
+  // what keeps a rule from ever crossing the reading.
+  &::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--tc-gutter) + 6px);
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--tc-rule);
+  }
+
+  &:first-child::before {
+    top: 9px;
+  }
+
+  &:last-child::before {
+    bottom: auto;
+    height: 14px;
+  }
+
+  // The node punches out of the line. Yours is filled, the agent's is hollow —
+  // which is what replaced the speaker labels.
+  &::after {
+    content: "";
+    position: absolute;
+    left: calc(var(--tc-gutter) + 3px);
+    top: 6px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--tc-surface);
+    border: 1.5px solid var(--tc-rule-2);
+    box-shadow: 0 0 0 2px var(--tc-surface);
+  }
+
+  &.is-you::after {
+    background: var(--tc-accent);
+    border-color: var(--tc-accent);
+  }
+
+  &.is-marked::after {
+    background: var(--tc-attn);
+    border-color: var(--tc-attn);
+  }
+
+  &__time {
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    color: var(--tc-ink-3);
+    text-align: right;
+    padding-top: 2px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  // The shell's own mark for a prompt. It is the only thing left saying "you".
+  &__caret {
+    color: var(--tc-accent);
+    font-weight: 600;
+    font-style: normal;
+  }
+
+  &__body {
+    min-width: 0;
+    padding-left: 8px;
+    padding-bottom: 22px;
+  }
+
+  :global(p) {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--tc-ink-2);
+  }
+
+  &.is-you :global(p) {
+    color: var(--tc-ink);
+  }
+}

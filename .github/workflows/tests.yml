@@ -1,0 +1,21 @@
+name: Tests
+
+# Inert on purpose. workflow_call is what build-all.yml needs to fan out to
+# this workflow; neither trigger fires on its own. Add `push:` and
+# `pull_request:` here to enable.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - run: mise trust --all
+      - run: mise run test-common
+      - run: mise run test-transport
+      - run: mise run test-server
+      - run: mise run test-relay
+      - run: mise run test-client

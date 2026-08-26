@@ -1,0 +1,30 @@
+name: Build relay
+
+# Inert on purpose. workflow_call is what build-all.yml needs to fan out to
+# this workflow; neither trigger fires on its own. Add `push:` and
+# `pull_request:` here to enable.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - run: mise trust --all
+      - run: mise run build-relay
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build relay image
+        run: docker build -f relay/Dockerfile .
+
+      # Enable by replacing `false` with a real condition and adding a
+      # docker/login-action step above. Needs permissions: packages: write.
+      - name: Push to ghcr
+        if: false
+        run: docker push ghcr.io/alaydriem/tethera-relay:latest

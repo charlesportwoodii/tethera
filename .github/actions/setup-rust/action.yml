@@ -1,0 +1,21 @@
+name: Setup Rust and mise
+description: Installs the pinned toolchain, mise, and a shared cargo cache
+
+inputs:
+  target:
+    description: Optional additional rustup target
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.target }}
+
+    - uses: Swatinem/rust-cache@v2
+
+    - uses: jdx/mise-action@v2
+      with:
+        experimental: true

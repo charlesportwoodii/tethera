@@ -1,0 +1,19 @@
+.tc-part {
+  &__text {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: inherit;
+  }
+
+  // A part this build does not know still renders: the gateway sends the source
+  // rows verbatim in fallback_text precisely so an old client is not blank.
+  &__fallback {
+    margin: 0;
+    font-family: var(--tc-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--tc-ink-3);
+    white-space: pre-wrap;
+  }
+}

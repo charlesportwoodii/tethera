@@ -1,0 +1,67 @@
+[workspace]
+# Crates are appended here as each is created. Cargo refuses to load a
+# workspace whose member manifest does not exist yet.
+members = [
+    "common", "transport", "server/entity", "server/migration", "server/server", "relay",
+    "client/src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "UNLICENSED"
+
+[workspace.dependencies]
+anyhow = { version = "^1.0" }
+thiserror = { version = "^2" }
+serde = { version = "^1", features = ["derive"] }
+serde_bytes = { version = "^0.11" }
+serde_json = { version = "^1" }
+toml = { version = "^0.9" }
+postcard = { version = "^1.1", features = ["use-std"] }
+ts-rs = { version = "^12.0" }
+tokio = { version = "^1.53", features = [
+    "macros", "rt-multi-thread", "sync", "time", "io-util", "net", "fs", "process", "signal",
+] }
+iroh = { version = "^1.1" }
+iroh-relay = { version = "^1.1", features = ["server"] }
+sea-orm = { version = "^2.0.2", features = [
+    "sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-chrono",
+] }
+sea-orm-migration = { version = "^2.0.2", features = [
+    "sqlx-sqlite", "runtime-tokio-rustls",
+] }
+clap = { version = "^4.6", features = ["derive", "env"] }
+tauri = { version = "^2.11", features = [] }
+tauri-build = { version = "^2", features = [] }
+log = { version = "^0.4" }
+directories = { version = "^6.0" }
+tracing = { version = "^0.1" }
+tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
+subtle = { version = "^2.6" }
+sha2 = { version = "^0.10" }
+qrcode = { version = "^0.14", default-features = false }
+chrono = { version = "^0.4", features = ["serde"] }
+url = { version = "^2.5" }
+rand = { version = "^0.8" }
+libc = { version = "^0.2" }
+rustls = { version = "^0.23", default-features = false, features = [
+    "ring", "std", "tls12", "logging",
+] }
+rustls-pemfile = { version = "^2" }
+tempfile = { version = "^3" }
+
+[profile.release]
+opt-level = 3
+strip = true
+debug = false
+codegen-units = 4
+lto = true
+incremental = false
+
+[profile.dev]
+opt-level = 1
+debug = 1
+incremental = true
+codegen-units = 4

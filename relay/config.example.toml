@@ -1,0 +1,6 @@
+http_bind = "0.0.0.0:8080"
+secret = "change-me-to-a-long-random-string"
+
+# Supply both, or neither. One without the other is a startup error.
+# tls_cert_path = "/etc/tethera/fullchain.pem"
+# tls_key_path = "/etc/tethera/privkey.pem"

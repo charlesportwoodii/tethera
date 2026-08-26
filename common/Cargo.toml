@@ -1,0 +1,25 @@
+[package]
+name = "tethera-common"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+autotests = false
+
+[lib]
+name = "tethera_common"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true }
+url = { workspace = true }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

@@ -1,0 +1,49 @@
+// An object rather than a divider, so it keeps an edge while the turns around it
+// have none.
+.tc-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--tc-r-chip);
+  background: var(--tc-surface-2);
+  color: var(--tc-ink-2);
+  font-family: var(--tc-mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  max-width: 100%;
+
+  &:focus-visible {
+    outline: 2px solid var(--tc-ink);
+    outline-offset: 2px;
+  }
+
+  &__name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__detail {
+    color: var(--tc-ink-3);
+    flex: none;
+
+    &.is-ok {
+      color: var(--tc-ok);
+    }
+
+    &.is-attn {
+      color: var(--tc-attn);
+    }
+  }
+
+  :global(.tc-icon) {
+    transition: none;
+  }
+
+  &.is-expanded :global(.tc-icon) {
+    transform: rotate(90deg);
+  }
+}

@@ -1,0 +1,109 @@
+[tools]
+node = "22"
+yarn = "1"
+
+[tasks.check-workspace]
+description = "cargo check across every workspace member"
+dir = "{{config_root}}"
+run = "cargo check --workspace"
+
+[tasks.check-common]
+description = "cargo check -p tethera-common"
+dir = "{{config_root}}"
+run = "cargo check -p tethera-common"
+
+[tasks.test-common]
+description = "cargo test -p tethera-common"
+dir = "{{config_root}}"
+run = "cargo test -p tethera-common"
+
+[tasks.bindings]
+description = "Regenerate ts-rs bindings by running the common tests"
+dir = "{{config_root}}"
+run = "cargo test -p tethera-common"
+
+[tasks.test-transport]
+description = "cargo test -p tethera-transport"
+dir = "{{config_root}}"
+run = "cargo test -p tethera-transport"
+
+[tasks.check-entity]
+description = "cargo check -p tethera-entity"
+dir = "{{config_root}}"
+run = "cargo check -p tethera-entity"
+
+[tasks.check-migration]
+description = "cargo check -p tethera-migration"
+dir = "{{config_root}}"
+run = "cargo check -p tethera-migration"
+
+[tasks.migrate]
+description = "Apply pending migrations to the database at DATABASE_URL"
+dir = "{{config_root}}"
+run = "cargo run -p tethera-migration -- up"
+
+[tasks.test-all]
+description = "Every test task"
+depends = ["test-common", "test-transport", "test-server", "test-relay"]
+
+[tasks.build-server]
+description = "cargo build in server/server"
+dir = "{{config_root}}/server/server"
+run = "cargo build"
+
+[tasks.test-server]
+description = "cargo test -j4 in server/server"
+dir = "{{config_root}}/server/server"
+run = "cargo test -j4"
+
+[tasks.dev-server]
+description = "cargo run -- server start in server/server"
+dir = "{{config_root}}/server/server"
+run = "cargo run -- server start"
+
+[tasks.build-relay]
+description = "cargo build -p tethera-relay"
+dir = "{{config_root}}"
+run = "cargo build -p tethera-relay"
+
+[tasks.test-relay]
+description = "cargo test -p tethera-relay"
+dir = "{{config_root}}"
+run = "cargo test -p tethera-relay"
+
+[tasks.deps]
+description = "yarn install in client/"
+dir = "{{config_root}}/client"
+run = "yarn install --frozen-lockfile"
+
+[tasks.frontend]
+description = "Build the SvelteKit frontend into client/build"
+dir = "{{config_root}}/client"
+depends = ["deps"]
+run = "yarn build"
+
+[tasks.build-client]
+description = "yarn tauri build --debug --no-sign"
+dir = "{{config_root}}/client"
+depends = ["frontend"]
+run = "yarn tauri build --debug --no-sign"
+
+[tasks.dev-client]
+description = "yarn tauri dev, or yarn tauri <target> dev when a target is named"
+dir = "{{config_root}}/client"
+run = "yarn tauri {{arg(name='target', default='')}} dev"
+
+[tasks.test-client]
+description = "yarn test (vitest run) in client/"
+dir = "{{config_root}}/client"
+depends = ["deps"]
+run = "yarn test"
+
+[tasks.setup]
+description = "Worktree bootstrap"
+depends = ["deps", "frontend"]
+
+[tasks.preflight]
+description = "Name what is missing before a build turns it into an obscure error"
+dir = "{{config_root}}"
+run = "node scripts/preflight.mjs"

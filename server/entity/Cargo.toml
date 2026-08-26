@@ -1,0 +1,14 @@
+[package]
+name = "tethera-entity"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+name = "tethera_entity"
+path = "src/lib.rs"
+
+[dependencies]
+sea-orm = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }

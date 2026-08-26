@@ -1,0 +1,13 @@
+.git
+target
+client/node_modules
+client/build
+client/.svelte-kit
+client/src-tauri/gen
+old
+design
+.superpowers
+.env
+.env.local
+**/*.sqlite3
+relay/relay.toml

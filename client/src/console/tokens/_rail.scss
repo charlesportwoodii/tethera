@@ -1,0 +1,22 @@
+// The rail geometry, in one place because three components have to agree on it:
+// the trunk, the elbow that joins it, and the glyph that punches out of it.
+//
+// $indent is how far a node's content sits from the rail. The elbow reaches back
+// by exactly that much, which is why it is expressed as a negative offset rather
+// than a second magic number.
+
+$rail-x: 7px;
+$node-indent: 26px;
+$twig-indent: 30px;
+$glyph: 14px;
+
+// Where an elbow starts, measured from a twig's own left edge.
+@function elbow-left() {
+  @return $rail-x - $node-indent;
+}
+
+// How far the elbow travels before the curve lets go, stopping short of the
+// twig's glyph so the mark is not sitting on the line's end cap.
+@function elbow-width() {
+  @return $node-indent - $rail-x + 10px;
+}

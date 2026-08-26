@@ -1,0 +1,66 @@
+// The one curved edge left in the app. It is a lip rather than a border because
+// the drawer is a thing that slides, not a panel bolted to the bottom.
+.tc-drawer {
+  background: var(--tc-term-bg);
+  border-radius: var(--tc-r-drawer) var(--tc-r-drawer) 0 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+
+  &.is-half,
+  &.is-full {
+    flex: 1;
+  }
+
+  &__pull {
+    width: 30px;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--tc-term-chrome);
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 6px;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 15px var(--tc-pad) 8px;
+    border: 0;
+    background: none;
+    width: 100%;
+    font-family: var(--tc-mono);
+    font-size: 10.5px;
+    color: var(--tc-term-dim);
+    text-align: left;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-accent);
+      outline-offset: -2px;
+    }
+  }
+
+  &__label {
+    color: var(--tc-term-fg);
+    flex: none;
+  }
+
+  &__summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}

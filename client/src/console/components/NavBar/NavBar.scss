@@ -1,0 +1,58 @@
+@use "../../tokens/mixins" as *;
+
+// No rule under the header. Space and the connection line do the separating, so
+// nothing is drawn across the full width of a screen.
+.tc-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px var(--tc-pad) 6px;
+
+  &__back {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    background: none;
+    color: var(--tc-ink-2);
+    flex: none;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+  }
+
+  &__text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    display: block;
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    color: var(--tc-ink);
+    @include truncate;
+  }
+
+  &__sub {
+    display: block;
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    color: var(--tc-ink-3);
+    letter-spacing: 0.02em;
+    @include truncate;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+  }
+}

@@ -1,0 +1,15 @@
+// The only global stylesheet. Everything else is scoped to its component.
+@use "./console/tokens/tokens";
+
+html,
+body {
+  margin: 0;
+  background: var(--tc-bg);
+  color: var(--tc-ink);
+  font-family: var(--tc-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}

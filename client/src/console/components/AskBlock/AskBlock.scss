@@ -1,0 +1,78 @@
+.tc-ask {
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--tc-surface-2);
+  // An inset ring rather than a border: the block must not grow by two pixels
+  // when it becomes the thing that is waiting.
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc-attn) 45%, transparent);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 12px;
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tc-attn);
+  }
+
+  &__prompt {
+    margin: 0;
+    padding: 0 12px 9px;
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--tc-ink);
+  }
+
+  &__option {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 12px;
+    border: 0;
+    background: none;
+    text-align: left;
+    font-family: var(--tc-font);
+    font-size: 12.5px;
+    align-items: flex-start;
+    cursor: pointer;
+
+    &:last-child {
+      padding-bottom: 11px;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: -2px;
+    }
+  }
+
+  // The number is how you answer from the composer as well, so it is part of the
+  // interface rather than an ornament.
+  &__key {
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    color: var(--tc-accent-ink);
+    background: var(--tc-accent);
+    width: 17px;
+    height: 17px;
+    border-radius: 5px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    margin-top: 1px;
+  }
+
+  &__label {
+    color: var(--tc-ink);
+    font-weight: 600;
+  }
+
+  &__detail {
+    color: var(--tc-ink-2);
+    line-height: 1.4;
+  }
+}

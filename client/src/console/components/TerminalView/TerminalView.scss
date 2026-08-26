@@ -1,0 +1,57 @@
+.tc-term {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--tc-term-bg);
+  color: var(--tc-term-fg);
+  font-family: var(--tc-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+
+  &__line {
+    white-space: pre;
+    // A pane is a grid. Wrapping would reflow output that was laid out in columns.
+    overflow: hidden;
+
+    &.is-dim {
+      color: var(--tc-term-dim);
+    }
+    &.is-ok {
+      color: var(--tc-ok);
+    }
+    &.is-accent {
+      color: var(--tc-accent);
+    }
+    &.is-warn {
+      color: var(--tc-working);
+    }
+    &.is-attn {
+      color: var(--tc-attn);
+    }
+  }
+
+  &__cursor {
+    display: inline-block;
+    width: 6px;
+    height: 12px;
+    background: var(--tc-ok);
+    vertical-align: -2px;
+    animation: tc-term-blink 1.1s step-end infinite;
+  }
+}
+
+@keyframes tc-term-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-term__cursor {
+    animation: none;
+  }
+}

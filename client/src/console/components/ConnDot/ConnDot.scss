@@ -1,0 +1,27 @@
+@use "../../tokens/mixins" as *;
+
+.tc-conn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--tc-ok);
+    flex: none;
+  }
+
+  // Hollow is the whole signal: filled means the machine answered, and how it
+  // was reached is a word, because the word already says it.
+  &.is-offline i {
+    background: transparent;
+    border: 1.5px solid var(--tc-ink-3);
+  }
+
+  span {
+    @include mono-label(10px, 0.1em);
+    @include truncate;
+  }
+}

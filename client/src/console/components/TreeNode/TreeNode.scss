@@ -1,0 +1,43 @@
+@use "../../tokens/rail" as rail;
+
+.tc-node {
+  position: relative;
+  padding-left: rail.$node-indent;
+  padding-bottom: 12px;
+
+  &.is-spaced {
+    padding-top: 14px;
+  }
+
+  &.is-dim {
+    opacity: 0.48;
+  }
+
+  &__glyph {
+    position: absolute;
+    left: 0;
+    top: 2px;
+    display: grid;
+    place-items: center;
+    z-index: 2;
+  }
+
+  &.is-spaced &__glyph {
+    top: 16px;
+  }
+
+  // The trunk starts below the glyph and stops short of the node's floor, so it
+  // reads as running between marks rather than through them.
+  &__trunk {
+    position: absolute;
+    left: rail.$rail-x;
+    top: 18px;
+    bottom: 12px;
+    width: 1px;
+    background: var(--tc-rule);
+  }
+
+  &.is-spaced &__trunk {
+    top: 32px;
+  }
+}

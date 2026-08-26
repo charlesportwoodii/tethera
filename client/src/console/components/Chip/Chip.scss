@@ -1,0 +1,36 @@
+.tc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: var(--tc-r-chip);
+  background: var(--tc-surface-2);
+  color: var(--tc-ink-2);
+  font-family: var(--tc-font);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &.is-selected {
+    background: var(--tc-accent);
+    color: var(--tc-accent-ink);
+    font-weight: 600;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--tc-ink);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .tc-chip__detail {
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    opacity: 0.75;
+  }
+}
