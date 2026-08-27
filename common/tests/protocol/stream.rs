@@ -1,10 +1,12 @@
 use tethera_common::protocol::handshake::{ClientHello, ClientInfo, Intent, Platform};
 use tethera_common::protocol::request::Request;
 use tethera_common::protocol::stream::StreamOpen;
+use tethera_common::protocol::view::PaneView;
 use tethera_common::protocol::terminal::AttachSpec;
 use tethera_common::protocol::transfer::{FetchSpec, PutSpec};
 use tethera_common::protocol::watch::WatchSpec;
 use tethera_common::protocol::WireVersion;
+use tethera_common::structs::terminal::Size;
 use tethera_common::structs::ids::{AssetId, PaneId};
 use tethera_common::structs::primitives::Sha256;
 
@@ -31,6 +33,8 @@ fn every_stream_kind_round_trips() {
         StreamOpen::Watch(WatchSpec::Machine),
         StreamOpen::Attach(AttachSpec {
             pane: PaneId::parse("pn_a1").expect("valid"),
+            view: PaneView::Lines,
+            viewport: Size { cols: 60, rows: 200 },
         }),
         StreamOpen::Fetch(FetchSpec {
             asset: AssetId::parse("as_9f21ab").expect("valid"),
@@ -65,6 +69,8 @@ fn only_a_hello_may_open_before_the_handshake() {
         StreamOpen::Watch(WatchSpec::Machine),
         StreamOpen::Attach(AttachSpec {
             pane: PaneId::parse("pn_a1").expect("valid"),
+            view: PaneView::Lines,
+            viewport: Size { cols: 60, rows: 200 },
         }),
         StreamOpen::Fetch(FetchSpec {
             asset: AssetId::parse("as_9f21ab").expect("valid"),

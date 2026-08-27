@@ -1,4 +1,7 @@
-use super::{AgentCapabilities, AgentProfile, AgentSpawn, NoiseFilter, TranscriptSource};
+use super::{
+    AgentCapabilities, AgentProfile, AgentSpawn, CommandTags, NoiseFilter, ScreenChrome,
+    TranscriptSource,
+};
 use crate::structs::ids::ProfileId;
 use crate::traits::AgentTrait;
 use std::path::Path;
@@ -65,6 +68,20 @@ impl AgentTrait for CodexAgent {
 
     fn noise_filter(&self) -> &'static NoiseFilter {
         &NoiseFilter::EMPTY
+    }
+
+    /// Nobody has measured how this harness records a command, so nothing here
+    /// pretends to know. Borrowing the other harness's tags would read these
+    /// records through a grammar that was never theirs.
+    fn command_tags(&self) -> Option<&'static CommandTags> {
+        None
+    }
+
+    /// Nobody has measured what this harness draws, so its screens are not read
+    /// and its pickers are not driven. A guess would answer the wrong option on
+    /// somebody's behalf and report that it had worked.
+    fn screen_chrome(&self) -> Option<&'static ScreenChrome> {
+        None
     }
 
     fn file_push_tools(&self) -> &'static [&'static str] {

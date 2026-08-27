@@ -10,10 +10,12 @@ pub mod stream;
 pub mod terminal;
 pub mod transfer;
 pub mod version;
+pub mod view;
 pub mod watch;
 
 pub use error::WireError;
 pub use request::Request;
 pub use response::{Payload, Response};
 pub use stream::StreamOpen;
+pub use view::PaneView;
 pub use version::WireVersion;

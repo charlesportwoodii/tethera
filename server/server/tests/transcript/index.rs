@@ -4,19 +4,59 @@ use tethera_common::structs::transcript::{Part, Role};
 // Every shape in the measured table, in one file. What survives is the point:
 // the filter drops what the harness wrote under the person's role and nothing
 // else.
+//
+// A slash command is the exception, and it is deliberate — see the two tests
+// below. It is written under the person's role because a person is what ran it.
 #[test]
 fn every_shape_the_harness_writes_under_the_persons_role_is_dropped() {
     let turns = Fixture::turns("noise.jsonl");
     let surviving: Vec<&str> = turns.iter().map(|turn| turn.id.as_str()).collect();
 
-    for dropped in [
-        "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "n10", "n11",
-    ] {
+    for dropped in ["n1", "n2", "n3", "n4", "n5", "n8", "n9", "n10", "n11"] {
         assert!(
             !surviving.contains(&dropped),
             "{dropped} reached the conversation"
         );
     }
+}
+
+// **A command a person ran is not noise, and its arguments are not either.**
+// The span dropped as noise used to run from `<command-name>` all the way to
+// `</command-args>`, so a command took the part that said what it was to do
+// with it: `/compact keep the plan` reached a phone as `/compact`, and
+// `/goal <task>` as `/goal`.
+#[test]
+fn a_command_a_person_ran_survives_with_its_arguments() {
+    let turns = Fixture::turns("noise.jsonl");
+    let kept = turns
+        .iter()
+        .find(|turn| turn.id.as_str() == "n6")
+        .expect("the command the person ran survives");
+
+    assert_eq!(kept.role, Role::Operator);
+    assert_eq!(Fixture::texts(kept), vec!["/compact keep the plan"]);
+}
+
+// Dropping this is why running a command from a phone looked like it had done
+// nothing: it ran, it printed, and the printing was thrown away.
+#[test]
+fn what_a_command_printed_survives_as_something_to_open() {
+    let turns = Fixture::turns("noise.jsonl");
+    let kept = turns
+        .iter()
+        .find(|turn| turn.id.as_str() == "n7")
+        .expect("the command's output survives");
+
+    let printed = kept
+        .parts
+        .iter()
+        .find_map(|part| match part {
+            Part::ToolUse { result, .. } => result.clone(),
+            _ => None,
+        })
+        .expect("the output is a fold with the printing in it");
+
+    assert_eq!(printed, "ok");
 }
 
 // The difference between a filter and a censor, and the reason wrappers are

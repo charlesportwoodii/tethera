@@ -1,6 +1,8 @@
 use tethera_common::protocol::watch::WatchEvent;
 use tethera_common::structs::ids::{PaneId, TabId, WorkspaceId};
-use tethera_common::structs::terminal::{Pane, Size, Tab, Workspace};
+use tethera_common::structs::terminal::{
+    Pane, PaneRect, PaneSlot, Size, Tab, TabLayout, Workspace,
+};
 use tethera_server_lib::protocol::live::TreeWatcher;
 use tethera_server_lib::protocol::ports::TreeSnapshot;
 
@@ -44,6 +46,7 @@ fn snapshot(workspaces: Vec<Workspace>, tabs: Vec<Tab>, panes: Vec<Pane>) -> Tre
         tabs,
         panes,
         conversations: Vec::new(),
+        layouts: Vec::new(),
     }
 }
 
@@ -145,4 +148,67 @@ fn a_later_observation_sends_what_changed() {
         receiver.try_recv(),
         Ok(WatchEvent::PaneChanged(_))
     ));
+}
+
+fn slot(pane: &str, x: u16, width: u16) -> PaneSlot {
+    PaneSlot {
+        pane: PaneId::mint(pane),
+        rect: PaneRect::new(x, 0, width, 40),
+    }
+}
+
+fn with_layout(slots: Vec<PaneSlot>) -> TreeSnapshot {
+    let mut snapshot = snapshot(Vec::new(), vec![tab("one", "one")], Vec::new());
+
+    snapshot.layouts = vec![TabLayout {
+        tab: TabId::mint("one"),
+        slots,
+        zoomed: None,
+    }];
+
+    snapshot
+}
+
+// A split changes no pane's identity — same ids, same labels, same cwds — so
+// only the geometry moves. Without this the map on the phone keeps the old
+// arrangement until something unrelated changes a pane.
+#[test]
+fn a_tab_whose_panes_moved_reports_a_layout_change() {
+    let before = with_layout(vec![slot("a", 0, 120)]);
+    let after = with_layout(vec![slot("a", 0, 60), slot("b", 60, 60)]);
+
+    let events = TreeWatcher::diff(&before, &after);
+
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, WatchEvent::LayoutChanged(_))));
+}
+
+// A tab that closed takes its layout with it. `TabRemoved` is the event that
+// says so, and a second event naming a layout for a tab that is gone would have
+// the client draw a map with nothing to put on it.
+#[test]
+fn a_closed_tab_reports_no_layout_change() {
+    let before = with_layout(vec![slot("a", 0, 120)]);
+    let after = snapshot(Vec::new(), Vec::new(), Vec::new());
+
+    let events = TreeWatcher::diff(&before, &after);
+
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, WatchEvent::LayoutChanged(_))));
+}
+
+// An unchanged layout is silence. A watch that re-reported every tab's geometry
+// on every poll would redraw the map twice a second for the life of the screen.
+#[test]
+fn a_layout_that_did_not_move_reports_nothing() {
+    let before = with_layout(vec![slot("a", 0, 60), slot("b", 60, 60)]);
+    let after = with_layout(vec![slot("a", 0, 60), slot("b", 60, 60)]);
+
+    let events = TreeWatcher::diff(&before, &after);
+
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, WatchEvent::LayoutChanged(_))));
 }

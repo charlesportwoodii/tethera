@@ -1,6 +1,8 @@
 mod capabilities;
+mod chrome;
 mod claude;
 mod codex;
+mod commands;
 mod noise;
 mod profile;
 mod source;
@@ -8,8 +10,10 @@ mod spawn;
 mod status;
 
 pub use capabilities::AgentCapabilities;
+pub use chrome::ScreenChrome;
 pub use claude::ClaudeAgent;
 pub use codex::CodexAgent;
+pub use commands::CommandTags;
 pub use noise::NoiseFilter;
 pub use profile::AgentProfile;
 pub use source::TranscriptSource;
@@ -82,6 +86,20 @@ impl AgentTrait for Agent {
         match self {
             Self::Claude => ClaudeAgent.noise_filter(),
             Self::Codex => CodexAgent.noise_filter(),
+        }
+    }
+
+    fn command_tags(&self) -> Option<&'static CommandTags> {
+        match self {
+            Self::Claude => ClaudeAgent.command_tags(),
+            Self::Codex => CodexAgent.command_tags(),
+        }
+    }
+
+    fn screen_chrome(&self) -> Option<&'static ScreenChrome> {
+        match self {
+            Self::Claude => ClaudeAgent.screen_chrome(),
+            Self::Codex => CodexAgent.screen_chrome(),
         }
     }
 

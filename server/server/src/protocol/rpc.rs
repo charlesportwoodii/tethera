@@ -218,6 +218,16 @@ impl Rpc {
                 Ok(Payload::Panes(ports.terminals().list_panes(&tab).await?))
             }
 
+            Request::PaneLayout { tab } => {
+                Ok(Payload::Layout(ports.terminals().layout(&tab).await?))
+            }
+
+            Request::FocusTab { tab } => {
+                ports.terminals().focus_tab(&tab).await?;
+
+                Ok(Payload::Ack)
+            }
+
             Request::OpenTerminal { workspace, cwd } => Ok(Payload::Pane(
                 ports
                     .terminals()

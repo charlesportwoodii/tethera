@@ -7,6 +7,7 @@
 //! because a client renders a control for it and a person taps it.
 
 mod assets;
+mod attached;
 mod blocks;
 mod conversations;
 mod digests;
@@ -17,6 +18,7 @@ mod terminals;
 mod watcher;
 
 pub use assets::LiveAssets;
+pub use attached::{HerdrSession, LiveSession};
 pub use blocks::BlockWatch;
 pub use conversations::LiveConversations;
 pub use digests::AssetDigests;

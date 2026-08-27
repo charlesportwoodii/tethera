@@ -14,7 +14,8 @@ use tethera_common::protocol::error::{EntityKind, WireError};
 use tethera_common::protocol::handshake::{DeviceRecord, ServerInfo};
 use tethera_common::protocol::response::{ConversationPreview, Describe, Limits, Page};
 use tethera_common::protocol::terminal::{
-    attrs, Color, CursorShape, CursorState, RowUpdate, Span, Style, TerminalFrame, TerminalInput,
+    attrs, AttachSpec, Color, CursorShape, CursorState, RowUpdate, Span, Style, TerminalFrame,
+    TerminalInput,
 };
 use tethera_common::protocol::transfer::{FetchHead, PutReady, PutResult, PutSpec};
 use tethera_common::protocol::watch::WatchEvent;
@@ -26,7 +27,9 @@ use tethera_common::structs::ids::{
     WorkspaceId,
 };
 use tethera_common::structs::primitives::{Cursor, Fingerprint, Sha256, Timestamp};
-use tethera_common::structs::terminal::{Pane, Size, SplitDirection, Tab, Workspace};
+use tethera_common::structs::terminal::{
+    Pane, Size, SplitDirection, Tab, TabLayout, Workspace,
+};
 use tethera_common::structs::transcript::{
     Ask,
     Answer, Part, Question, QuestionOption, Role, Turn,
@@ -116,6 +119,7 @@ impl FakePorts {
             terminals: FakeTerminals {
                 opened: Mutex::new(Vec::new()),
                 inputs: std::sync::Arc::new(Mutex::new(Vec::new())),
+                focused: Mutex::new(Vec::new()),
             },
             assets: FakeAssets {
                 uploaded: Mutex::new(Vec::new()),
@@ -232,6 +236,7 @@ impl MachinePort for FakeMachine {
         let agent_tab = TabId::parse("tb_claude").expect("valid");
 
         Ok(TreeSnapshot {
+            layouts: Vec::new(),
             workspaces: vec![
                 Workspace {
                     id: workspace.clone(),
@@ -632,6 +637,11 @@ impl ConversationPort for FakeConversations {
 pub struct FakeTerminals {
     opened: Mutex<Vec<PaneId>>,
     inputs: std::sync::Arc<Mutex<Vec<TerminalInput>>>,
+    /// Every tab a caller asked the desk to move to, in order.
+    ///
+    /// Recorded rather than acted on, so a test can assert that a tab tap
+    /// reached the backend without a screen to read it off.
+    focused: Mutex<Vec<TabId>>,
 }
 
 impl FakeTerminals {
@@ -664,6 +674,22 @@ impl TerminalPort for FakeTerminals {
 
     async fn list_panes(&self, _tab: &TabId) -> Result<Vec<Pane>, WireError> {
         Ok(Vec::new())
+    }
+
+    /// No tab this fake reports has a geometry, so every tab is a miss.
+    ///
+    /// `NotFound` rather than an empty layout: a client told a tab has no panes
+    /// draws an empty workspace, which is a different and wrong statement.
+    async fn layout(&self, _tab: &TabId) -> Result<TabLayout, WireError> {
+        Err(WireError::NotFound {
+            kind: EntityKind::Tab,
+        })
+    }
+
+    async fn focus_tab(&self, tab: &TabId) -> Result<(), WireError> {
+        self.focused.lock().expect("lock").push(tab.clone());
+
+        Ok(())
     }
 
     async fn open(
@@ -703,8 +729,8 @@ impl TerminalPort for FakeTerminals {
         Ok(())
     }
 
-    async fn attach(&self, pane: &PaneId) -> Result<Self::Session, WireError> {
-        if *pane != agent_pane() {
+    async fn attach(&self, spec: &AttachSpec) -> Result<Self::Session, WireError> {
+        if spec.pane != agent_pane() {
             return Err(WireError::NotFound {
                 kind: EntityKind::Pane,
             });

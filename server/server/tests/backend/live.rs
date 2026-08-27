@@ -73,13 +73,25 @@ impl Drop for Scratch {
     }
 }
 
+
+/// Built the way the server builds one: off the harness's own table.
+fn detector() -> PromptDetector {
+    PromptDetector::for_agent(Agent::Claude).expect("this harness has been measured")
+}
+
+/// Built the way the server builds one: off the harness's own table.
+fn picker() -> Picker {
+    Picker::for_agent(Agent::Claude).expect("this harness has been measured")
+}
+
 #[test]
 #[ignore = "needs a running herdr"]
 fn the_backend_reads_the_operators_real_session() {
     let scratch = Scratch::new();
     let backend = scratch.backend();
 
-    let (workspaces, tabs, panes) = backend.tree().expect("herdr answered a tree");
+    let tree = backend.tree().expect("herdr answered a tree");
+    let (workspaces, tabs, panes) = (tree.workspaces, tree.tabs, tree.panes);
 
     println!("workspaces: {}", workspaces.len());
     for workspace in &workspaces {
@@ -551,7 +563,7 @@ fn a_permission_prompt_is_read_off_the_screen_and_answered_by_a_press() {
         .position(|option| option.label.eq_ignore_ascii_case("No"))
         .expect("a way to decline");
 
-    for step in Picker::steps(&question.asks, &[Answer::Choice(refuse as u16)])
+    for step in picker().steps(&question.asks, &[Answer::Choice(refuse as u16)])
         .expect("presses for the refusal")
     {
         match step {
@@ -567,7 +579,7 @@ fn a_permission_prompt_is_read_off_the_screen_and_answered_by_a_press() {
     std::thread::sleep(Duration::from_secs(3));
 
     assert!(
-        PromptDetector::detect(&backend.screen(&pane.id).expect("a screen")).is_none(),
+        detector().detect(&backend.screen(&pane.id).expect("a screen")).is_none(),
         "the prompt is still on screen, so the press did not answer it"
     );
     assert!(
@@ -629,7 +641,7 @@ fn poll_for_prompt(
     for _ in 0..90 {
         last = backend.screen(pane).unwrap_or_default();
 
-        if let Some(found) = PromptDetector::detect(&last) {
+        if let Some(found) = detector().detect(&last) {
             return found;
         }
 

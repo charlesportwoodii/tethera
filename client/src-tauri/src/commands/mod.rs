@@ -6,6 +6,7 @@ pub(crate) mod conversation;
 pub(crate) mod pairing;
 pub(crate) mod servers;
 pub(crate) mod settings;
+pub(crate) mod terminal;
 pub(crate) mod sessions;
 
 use crate::state::AppState;

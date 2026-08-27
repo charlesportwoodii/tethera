@@ -23,12 +23,13 @@ fn negotiation_against_an_empty_list_is_none() {
     assert_eq!(WireVersion::negotiate(&[WireVersion(1)], &[]), None);
 }
 
-// Two, and only two. A build that offered version one as well would be
-// promising an encoding it cannot produce: the change that ended version one
-// added struct fields, and postcard writes struct fields positionally.
+// Three, and only three. A build that offered either older version as well
+// would be promising an encoding it cannot produce: version one ended by adding
+// struct fields and version two by adding one to `WatchOpen::Machine`, and
+// postcard writes a struct variant's fields as positionally as a struct's.
 #[test]
-fn this_build_speaks_version_two_and_nothing_older() {
-    assert_eq!(WireVersion::SUPPORTED, &[WireVersion(2)]);
+fn this_build_speaks_version_three_and_nothing_older() {
+    assert_eq!(WireVersion::SUPPORTED, &[WireVersion(3)]);
 }
 
 // The refusal an older client actually receives. Silent misdecoding is the
@@ -37,6 +38,18 @@ fn this_build_speaks_version_two_and_nothing_older() {
 fn a_client_that_only_speaks_version_one_shares_nothing_with_this_build() {
     assert_eq!(
         WireVersion::negotiate(WireVersion::SUPPORTED, &[WireVersion(1)]),
+        None
+    );
+}
+
+// The version an already-installed client speaks, which makes this the refusal
+// that actually happens rather than a hypothetical one. It is deliberate: a
+// version two client decoding a version three `WatchOpen::Machine` would read
+// the layouts field's length prefix as part of the conversation list.
+#[test]
+fn a_client_that_only_speaks_version_two_shares_nothing_with_this_build() {
+    assert_eq!(
+        WireVersion::negotiate(WireVersion::SUPPORTED, &[WireVersion(2)]),
         None
     );
 }

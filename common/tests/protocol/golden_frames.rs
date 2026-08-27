@@ -20,12 +20,12 @@ use tethera_common::structs::ids::{
     ConversationId, PaneId, ProfileId, ServerId, TabId, TurnId, WorkspaceId,
 };
 use tethera_common::structs::primitives::{Cursor, Sha256, Timestamp};
-use tethera_common::structs::terminal::{Pane, Size};
+use tethera_common::structs::terminal::{Pane, PaneRect, PaneSlot, Size, TabLayout};
 use tethera_common::structs::transcript::{Part, Role, ToolStatus, Turn};
 
 use crate::golden::assert_golden;
 
-const V2: WireVersion = WireVersion(2);
+const V3: WireVersion = WireVersion(3);
 
 fn a_pane() -> Pane {
     Pane {
@@ -77,7 +77,7 @@ fn a_client_hello_encodes_the_same_bytes_it_always_has() {
         intent: Intent::Session,
     });
 
-    assert_golden(V2, "client_hello", &hello);
+    assert_golden(V3, "client_hello", &hello);
 }
 
 #[test]
@@ -88,12 +88,12 @@ fn a_transcript_request_encodes_the_same_bytes_it_always_has() {
         limit: 30,
     };
 
-    assert_golden(V2, "request_transcript", &request);
+    assert_golden(V3, "request_transcript", &request);
 }
 
 #[test]
 fn a_pane_response_encodes_the_same_bytes_it_always_has() {
-    assert_golden(V2, "response_pane", &Response::Ok(Payload::Pane(a_pane())));
+    assert_golden(V3, "response_pane", &Response::Ok(Payload::Pane(a_pane())));
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn a_text_turn_encodes_the_same_bytes_it_always_has() {
         }],
     };
 
-    assert_golden(V2, "turn_text", &turn);
+    assert_golden(V3, "turn_text", &turn);
 }
 
 #[test]
@@ -127,12 +127,12 @@ fn a_tool_use_turn_encodes_the_same_bytes_it_always_has() {
         }],
     };
 
-    assert_golden(V2, "turn_tool_use", &turn);
+    assert_golden(V3, "turn_tool_use", &turn);
 }
 
 #[test]
 fn an_unbound_conversation_encodes_the_same_bytes_it_always_has() {
-    assert_golden(V2, "conversation_unbound", &an_unbound_conversation());
+    assert_golden(V3, "conversation_unbound", &an_unbound_conversation());
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn a_terminal_snapshot_encodes_the_same_bytes_it_always_has() {
         scrollback_len: Some(1200),
     };
 
-    assert_golden(V2, "terminal_snapshot", &frame);
+    assert_golden(V3, "terminal_snapshot", &frame);
 }
 
 #[test]
@@ -168,9 +168,30 @@ fn a_machine_watch_open_encodes_the_same_bytes_it_always_has() {
         tabs: Vec::new(),
         panes: vec![a_pane()],
         conversations: vec![an_unbound_conversation()],
+        layouts: Vec::new(),
     };
 
-    assert_golden(V2, "watch_open_machine", &open);
+    assert_golden(V3, "watch_open_machine", &open);
+}
+
+#[test]
+fn a_layout_payload_encodes_the_same_bytes_it_always_has() {
+    let layout = TabLayout {
+        tab: TabId::parse("tb_b2").expect("valid"),
+        slots: vec![
+            PaneSlot {
+                pane: PaneId::parse("pn_a1").expect("valid"),
+                rect: PaneRect::new(0, 0, 100, 50),
+            },
+            PaneSlot {
+                pane: PaneId::parse("pn_a2").expect("valid"),
+                rect: PaneRect::new(100, 0, 100, 50),
+            },
+        ],
+        zoomed: None,
+    };
+
+    assert_golden(V3, "response_layout", &Response::Ok(Payload::Layout(layout)));
 }
 
 #[test]
@@ -182,12 +203,12 @@ fn a_fetch_head_encodes_the_same_bytes_it_always_has() {
         offset: 4096,
     };
 
-    assert_golden(V2, "fetch_head", &head);
+    assert_golden(V3, "fetch_head", &head);
 }
 
 #[test]
 fn a_server_id_still_encodes_as_its_whole_prefixed_string() {
     let id = ServerId::parse("sv_a1").expect("valid");
 
-    assert_golden(V2, "server_id", &id);
+    assert_golden(V3, "server_id", &id);
 }

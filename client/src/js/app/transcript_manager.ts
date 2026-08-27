@@ -39,6 +39,21 @@ const NOTHING: ConversationControls = {
  * on the way in.
  */
 export class TranscriptManager {
+  /**
+   * How much of a text file a preview reads before it lets go of the stream.
+   *
+   * The console library exports its own 64 KB ceiling, which is right for a
+   * thumbnail and wrong for the files this app actually carries: a plan or a
+   * spec runs past it easily, and the reader is left with a document that stops
+   * mid-sentence and a `truncated` flag telling them so. Ours is set where a
+   * whole document fits.
+   *
+   * Only text is bounded by this. An image has to arrive whole to decode, so
+   * the Rust side takes the file's own length for one and refuses anything past
+   * `Assets::MAX_IMAGE_PREVIEW` instead of fetching bytes it will discard.
+   */
+  static readonly TEXT_PREVIEW_BYTES = 2.5 * 1024 * 1024;
+
   private readonly turnStore: Writable<Turn[]>;
   private readonly conversationStore: Writable<Conversation | null>;
   private readonly controlStore: Writable<ConversationControls>;

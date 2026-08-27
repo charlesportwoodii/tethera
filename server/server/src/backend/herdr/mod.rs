@@ -13,6 +13,9 @@ pub use scrollback::{ScrollbackPageOf, ScrollbackWindow};
 pub use wire::Snapshot;
 
 use crate::backend::error::BackendError;
+use crate::backend::BackendTree;
+use tethera_common::structs::terminal::TabLayout;
+use tethera_common::protocol::view::PaneView;
 use tethera_common::protocol::terminal::{Key, Mods};
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
@@ -187,21 +190,76 @@ impl HerdrBackend {
         Ok(window.resolve(raw.lines().map(str::to_owned).collect()))
     }
 
+    /// A pane's current content, with the styles it is drawn in.
+    ///
+    /// Raw ANSI rather than the parsed envelope every other call returns,
+    /// because `pane read` answers with the text itself and not with JSON. It is
+    /// fed to an emulator, so the escape sequences are the payload.
+    ///
+    /// `strip_ansi` is not passed: `--format ansi` is what keeps the colours,
+    /// and a read without it returns a screen that renders as plain grey.
+    pub fn read_screen(
+        &self,
+        pane: &PaneId,
+        view: PaneView,
+        lines: u16,
+    ) -> Result<String, BackendError> {
+        let native = HerdrIds::native_pane(pane)?;
+        let requested = lines.to_string();
+
+        // Hyphens, not the underscores the socket schema spells these with. The
+        // CLI and the socket disagree about this one value.
+        let source = match view {
+            PaneView::Lines => "recent-unwrapped",
+            PaneView::Screen => "visible",
+        };
+
+        self.herdr.run(&[
+            "pane",
+            "read",
+            native,
+            "--source",
+            source,
+            "--lines",
+            &requested,
+            "--format",
+            "ansi",
+        ])
+    }
+
     /// The whole tree in one snapshot, for the machine port above.
     ///
     /// `TerminalPort` has no `list_workspaces` — `ListWorkspaces` is served
     /// from the machine's tree — so this is the seam that lets one snapshot
     /// answer all three ranks instead of three.
-    pub fn tree(&self) -> Result<(Vec<Workspace>, Vec<Tab>, Vec<Pane>), BackendError> {
+    pub fn tree(&self) -> Result<BackendTree, BackendError> {
         let snapshot = self.snapshot()?;
         let wanted = Self::needs_process_info(Self::tab_primaries(&snapshot).into_iter());
         let foreground = self.foreground(&wanted);
 
-        Ok((
-            Mapping::workspaces(&snapshot),
-            Mapping::tabs(&snapshot, None, &foreground),
-            Mapping::panes(&snapshot, None, &foreground, self.default_size),
-        ))
+        let tabs = Mapping::tabs(&snapshot, None, &foreground);
+
+        // From this snapshot, not a call per tab. Asking `tab_layout` once per
+        // tab would run one `herdr api snapshot` per tab, and a machine watch
+        // reads this on a two-second timer for as long as somebody is looking.
+        //
+        // Driven from the layouts rather than from the tabs, so nothing here can
+        // fail: each layout carries its own native tab id and `HerdrIds::tab` is
+        // the constructor direction. Going the other way needs `native_tab`,
+        // which is fallible, and its only honest failure handling would be to
+        // drop a tab's geometry silently.
+        let layouts = snapshot
+            .layouts
+            .iter()
+            .map(|layout| Mapping::layout(layout, &HerdrIds::tab(&layout.tab_id)))
+            .collect();
+
+        Ok(BackendTree {
+            workspaces: Mapping::workspaces(&snapshot),
+            tabs,
+            panes: Mapping::panes(&snapshot, None, &foreground, self.default_size),
+            layouts,
+        })
     }
 
     /// A pane herdr has just made, given its own answer about it.
@@ -241,6 +299,25 @@ impl Default for HerdrBackend {
 impl TerminalBackendTrait for HerdrBackend {
     fn list_workspaces(&self) -> anyhow::Result<Vec<Workspace>> {
         Ok(Mapping::workspaces(&self.snapshot()?))
+    }
+
+    fn tab_layout(&self, tab_id: &TabId) -> anyhow::Result<TabLayout> {
+        let native = HerdrIds::native_tab(tab_id)?;
+        let snapshot = self.snapshot()?;
+
+        let herdr = snapshot
+            .layout_of_tab(native)
+            .ok_or_else(|| anyhow::anyhow!("herdr placed no panes in tab {native}"))?;
+
+        Ok(Mapping::layout(herdr, tab_id))
+    }
+
+    fn focus_tab(&self, tab_id: &TabId) -> anyhow::Result<()> {
+        let native = HerdrIds::native_tab(tab_id)?;
+
+        self.herdr.run(&["tab", "focus", native])?;
+
+        Ok(())
     }
 
     fn create_workspace(&self, name: &str) -> anyhow::Result<Workspace> {

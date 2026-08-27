@@ -3,6 +3,8 @@ name: Build all
 # Inert on purpose. Add `push:` and `pull_request:` here to enable.
 on:
   workflow_dispatch:
+  pull_request:
+  push:
 
 jobs:
   changes:

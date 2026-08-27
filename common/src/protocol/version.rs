@@ -25,10 +25,13 @@ impl WireVersion {
     /// send; it cannot un-send a field. Offering version one would mean
     /// promising an encoding this build is incapable of producing.
     ///
+    /// Version two ended the same way: `WatchOpen::Machine` gained a `layouts`
+    /// field, and a struct variant's fields are as positional as a struct's.
+    ///
     /// So an older client is refused by name at the handshake, which is the
     /// whole reason this number exists: the alternative is a phone decoding a
     /// pane into the wrong fields and drawing it.
-    pub const SUPPORTED: &'static [WireVersion] = &[WireVersion(2)];
+    pub const SUPPORTED: &'static [WireVersion] = &[WireVersion(3)];
 
     /// The highest version both sides speak, or `None` when they share none.
     ///

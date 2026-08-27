@@ -3,7 +3,9 @@ mod display_name;
 mod downloads;
 mod keyring;
 mod logging;
+mod panes;
 mod state;
+mod machine_watch;
 mod watches;
 
 use downloads::Downloads;
@@ -180,6 +182,21 @@ pub fn run() {
             commands::pairing::pair_begin,
             commands::pairing::pair_submit,
             commands::pairing::pair_cancel,
+            commands::terminal::list_workspaces,
+            commands::terminal::list_tabs,
+            commands::terminal::list_panes,
+            commands::terminal::pane_layout,
+            commands::terminal::focus_tab,
+            commands::terminal::watch_machine,
+            commands::terminal::unwatch_machine,
+            commands::terminal::terminal_controls,
+            commands::terminal::attach_pane,
+            commands::terminal::detach_pane,
+            commands::terminal::pane_key,
+            commands::terminal::pane_text,
+            commands::terminal::open_terminal,
+            commands::terminal::split_pane,
+            commands::terminal::close_pane,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tethera");

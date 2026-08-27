@@ -2,19 +2,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tethera_common::protocol::capability::{self, CapabilityId, CapabilitySet};
-use tethera_common::protocol::error::WireError;
-use tethera_common::protocol::terminal::{attrs, Color, Key, Mods, RowUpdate, Span, Style};
+use tethera_common::protocol::error::{EntityKind, WireError};
+use tethera_common::protocol::terminal::{
+    attrs, AttachSpec, Color, Key, Mods, RowUpdate, Span, Style,
+};
+use tethera_common::protocol::view::PaneView;
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
-use tethera_common::structs::terminal::{Pane, SplitDirection, Tab, Workspace};
+use tethera_common::structs::terminal::{Pane, SplitDirection, Tab, TabLayout};
 use tethera_common::traits::TerminalBackendTrait;
 use tokio::sync::Semaphore;
 
-use crate::backend::{BackendError, TerminalBackend};
+use crate::backend::{BackendError, BackendTree, TerminalBackend};
 use crate::config::{ApplicationConfig, TerminalKind};
-use crate::protocol::live::PaneSession;
+use crate::protocol::live::{HerdrSession, LiveSession};
 use crate::protocol::ports::{ScrollbackPage, TerminalPort};
-use crate::terminal::{PaneRegistry, PtyBackend};
+use crate::terminal::{HerdrSource, PaneRegistry, PtyBackend};
 
 /// `TerminalPort` over a real terminal backend.
 ///
@@ -178,8 +181,28 @@ impl LiveTerminals {
         if self.backend.can_attach() {
             named.push(capability::TERMINAL_ATTACH);
             named.push(capability::TERMINAL_INPUT);
-        } else {
+        }
+
+        // Asked of the backend rather than inferred from attach. The two were
+        // the same question while only one backend could attach; they are not
+        // the same question now, and reading one off the other would quietly
+        // stop advertising a split that works.
+        if self.backend.can_split() {
             named.push(capability::PANE_SPLIT);
+            // The same fact, not a second one: a backend with a layout engine is
+            // exactly a backend that has a layout to report.
+            named.push(capability::PANE_LAYOUT);
+        }
+
+        // A different fact, and it gets its own question. A pty's panes are this
+        // process's own and nothing displays them, so there is no focus to move
+        // even though the two answers happen to coincide today.
+        if self.backend.can_focus() {
+            named.push(capability::TAB_FOCUS);
+        }
+
+        if self.backend.can_lines_view() {
+            named.push(capability::TERMINAL_LINES_VIEW);
         }
 
         named.into_iter().map(CapabilityId::from).collect()
@@ -187,12 +210,12 @@ impl LiveTerminals {
 
     /// Every rank of the tree from one backend round trip, for the machine port
     /// above, which is what `Request::ListWorkspaces` is served from.
-    pub async fn tree(&self) -> Result<(Vec<Workspace>, Vec<Tab>, Vec<Pane>), WireError> {
+    pub async fn tree(&self) -> Result<BackendTree, WireError> {
         let tree = self
             .run(|backend| backend.tree().map_err(anyhow::Error::from))
             .await?;
 
-        *self.seen.lock().expect("lock") = tree.2.clone();
+        *self.seen.lock().expect("lock") = tree.panes.clone();
 
         Ok(tree)
     }
@@ -320,7 +343,7 @@ impl LiveTerminals {
 }
 
 impl TerminalPort for LiveTerminals {
-    type Session = PaneSession;
+    type Session = LiveSession;
 
     async fn list_tabs(&self, workspace: &WorkspaceId) -> Result<Vec<Tab>, WireError> {
         let workspace = workspace.clone();
@@ -332,6 +355,18 @@ impl TerminalPort for LiveTerminals {
         let tab = tab.clone();
 
         self.run(move |backend| backend.list_panes(&tab)).await
+    }
+
+    async fn layout(&self, tab: &TabId) -> Result<TabLayout, WireError> {
+        let tab = tab.clone();
+
+        self.run(move |backend| backend.tab_layout(&tab)).await
+    }
+
+    async fn focus_tab(&self, tab: &TabId) -> Result<(), WireError> {
+        let tab = tab.clone();
+
+        self.run(move |backend| backend.focus_tab(&tab)).await
     }
 
     async fn open(
@@ -366,18 +401,64 @@ impl TerminalPort for LiveTerminals {
         self.run(move |backend| backend.close(&pane)).await
     }
 
-    async fn attach(&self, pane: &PaneId) -> Result<Self::Session, WireError> {
-        // A pane the registry holds has an emulator behind it, and nothing else
-        // does: herdr publishes no per-pane byte stream, and feeding a re-rendered
-        // screen to an emulator would draw a plausible grid over that gap.
-        //
-        // `NotFound` and not `Unsupported`, which the registry already answers.
-        // On the pty backend `terminal_attach` is advertised and works, so
-        // `Unsupported` would be a false statement about the capability when the
-        // truth is that the pane is not here. On the herdr backend the registry
-        // holds nothing, so every pane is `NotFound` - which is the honest answer
-        // for a pane that is real and unreadable.
-        self.panes.attach(pane)
+    async fn attach(&self, spec: &AttachSpec) -> Result<Self::Session, WireError> {
+        // Keyed on which backend owns the feed, not on whether the registry
+        // already holds this pane. `holds` is true for a pty pane from the
+        // moment it is opened and true for a herdr pane once anybody has looked
+        // at it - so gating on it skipped `ensure` for every *re*-attach, and a
+        // re-attach carrying a different view is exactly what the view toggle
+        // is. That is what made the toggle inert even after `ensure` itself
+        // learned to notice a changed shape.
+        if self.backend.is_pulled() {
+            if !self.backend.can_attach() {
+                return Err(WireError::NotFound {
+                    kind: EntityKind::Pane,
+                });
+            }
+
+            // `Lines` needs a backend that can return output with its wrapping
+            // removed. Refusing here rather than quietly serving the other view
+            // keeps the answer honest: `terminal_lines_view` says which machines
+            // offer it, and a client that ignored that gets told.
+            if spec.view == PaneView::Lines && !self.backend.can_lines_view() {
+                return Err(WireError::Backend {
+                    message: "this machine cannot return output with its wrapping removed"
+                        .to_string(),
+                });
+            }
+
+            HerdrSource::ensure(
+                Arc::clone(&self.backend),
+                Arc::clone(&self.panes),
+                Arc::clone(&self.gate),
+                spec.pane.clone(),
+                spec.view,
+                spec.viewport,
+            );
+        } else if !self.panes.holds(&spec.pane) {
+            // A pushed pane is adopted when it is opened, so one the registry
+            // does not hold is one this machine does not have.
+            return Err(WireError::NotFound {
+                kind: EntityKind::Pane,
+            });
+        }
+
+        let frames = self.panes.attach(&spec.pane)?;
+
+        // Input splits here and nowhere else. A pty takes the bytes the emulator
+        // encoded; herdr takes key names, and the emulator is a reader of its
+        // panes rather than their owner, so anything written into it would reach
+        // nobody.
+        if self.backend.can_lines_view() {
+            return Ok(LiveSession::Herdr(HerdrSession::new(
+                frames,
+                Arc::clone(&self.backend),
+                Arc::clone(&self.gate),
+                spec.pane.clone(),
+            )));
+        }
+
+        Ok(LiveSession::Direct(frames))
     }
 
     async fn scrollback(

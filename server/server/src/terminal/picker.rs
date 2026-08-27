@@ -1,6 +1,8 @@
 use tethera_common::protocol::error::WireError;
 use tethera_common::protocol::terminal::{Key, Mods, TerminalInput};
+use tethera_common::structs::agent::{Agent, ScreenChrome};
 use tethera_common::structs::transcript::{Answer, Ask};
+use tethera_common::traits::AgentTrait;
 
 /// Answering an agent's question picker, as key presses.
 ///
@@ -24,18 +26,35 @@ use tethera_common::structs::transcript::{Answer, Ask};
 ///   a `Return`. The side-by-side picker has no such row at all.
 /// - A set of more than one answer ends on a review screen, which submits with
 ///   `1`. A single question submits the moment its row is taken.
-pub struct Picker;
+pub struct Picker {
+    chrome: &'static ScreenChrome,
+}
 
 impl Picker {
+    /// A driver for a harness somebody has measured.
+    ///
+    /// `None` for one nobody has. **Every rule above describes one harness**,
+    /// and a picker driven on the assumption that a second behaves the same
+    /// would press keys at a screen nobody has looked at, take whatever they
+    /// selected as the answer, and report that it worked. Refusing leaves a
+    /// person answering at the machine, which is where they already were.
+    pub fn for_agent(agent: Agent) -> Option<Self> {
+        agent.screen_chrome().map(|chrome| Self { chrome })
+    }
+
     /// What the review screen says, and how this server knows one is showing.
     ///
     /// Read rather than predicted. Whether a review appears depends on the shape
     /// of the set, and a rule inferred from today's harness would submit into
     /// whatever is on screen the day that changes.
-    pub const REVIEW_MARKER: &'static str = "Ready to submit your answers?";
+    pub fn review_marker(&self) -> &'static str {
+        self.chrome.review_marker
+    }
 
-    /// The row that submits from the review screen.
-    pub const SUBMIT: Key = Key::Char('1');
+    /// The key that sends a completed review.
+    pub fn submit(&self) -> Key {
+        Key::Char(self.chrome.submit)
+    }
 
     /// The highest row a number key can reach.
     ///
@@ -49,7 +68,11 @@ impl Picker {
     /// Built before anything is sent, so a set this server cannot express is
     /// refused with the picker untouched. Half-driving it would leave a person's
     /// screen part-answered with no way back.
-    pub fn steps(asks: &[Ask], answers: &[Answer]) -> Result<Vec<TerminalInput>, WireError> {
+    /// Takes `&self` so that driving a picker requires having been handed one,
+    /// and a harness nobody has measured cannot be handed one at all. The key
+    /// sequence below is the measured harness's; a second would make it another
+    /// field on `ScreenChrome` rather than a branch here.
+    pub fn steps(&self, asks: &[Ask], answers: &[Answer]) -> Result<Vec<TerminalInput>, WireError> {
         if answers.len() != asks.len() {
             return Err(WireError::Backend {
                 message: format!(

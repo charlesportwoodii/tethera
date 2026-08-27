@@ -19,13 +19,21 @@
     Timeline,
     Turn,
   } from "$console";
-  import { PREVIEW_BYTES, previewKind } from "$console";
+  import { previewKind } from "$console";
+  import HtmlPreview from "$components/HtmlPreview.svelte";
+  import MarkdownBody from "$components/MarkdownBody.svelte";
+  import { MarkdownTables } from "$managers/tables";
   import { Parts } from "$managers/parts";
   import { TranscriptManager, type Listen } from "$managers/transcript_manager";
   import { DownloadManager, type ListenDownloads } from "$managers/download_manager";
   import DownloadTray from "$components/DownloadTray.svelte";
   import ConversationGlyph from "$components/ConversationGlyph.svelte";
   import { Conversations } from "$managers/conversations";
+  import ComposerRail from "$components/ComposerRail.svelte";
+  import LayoutSheet from "$components/LayoutSheet.svelte";
+  import { Floorplan } from "$managers/floorplan";
+  import { MachineManager } from "$managers/machine_manager";
+  import { TerminalManager, type Listen as TreeListen } from "$managers/terminal_manager";
   import type { Answer } from "$bindings/Answer";
   import type { AssetPreview } from "$bindings/AssetPreview";
   import type { Attached } from "$bindings/Attached";
@@ -53,15 +61,102 @@
   const downloads = new DownloadManager(invoke, listen as unknown as ListenDownloads);
   const carrying = downloads.rows;
 
+  // The machine's tree, for one purpose: three agents can share one herdr tab,
+  // and this is how the second one is reached. Without it the only way from C1
+  // to C2 is back out to the machine screen and in again.
+  const tree = new MachineManager(invoke, listen as unknown as TreeListen, server);
+  const terminals = new TerminalManager(invoke, listen as unknown as TreeListen, server, 1, 1);
+  const terminalControls = terminals.controls;
+  const treePanes = tree.panes;
+  const treeLayouts = tree.layouts;
+
+  /** The pane this conversation is running in, when the machine says so. */
+  const mine = $derived(
+    $treePanes.find((pane) => (pane.conversation as unknown as string) === id) ?? null,
+  );
+
+  const tabPanes = $derived(
+    mine === null
+      ? []
+      : $treePanes.filter((pane) => pane.tab_id === mine.tab_id),
+  );
+
+  const tabLayout = $derived(
+    mine === null
+      ? null
+      : ($treeLayouts.find((layout) => layout.tab === mine.tab_id) ?? null),
+  );
+
+  /** Open over the transcript when somebody asks which agents are in this tab. */
+  let mapping = $state(false);
+  let selectedPane = $state<string | null>(null);
+
   let draft = $state("");
   let sending = $state(false);
   let doc: HTMLDivElement | null = $state(null);
 
+  /**
+   * How tall the file sheet opens, and how far a drag may take it.
+   *
+   * The floor leaves the sheet unmistakably present — dragging it to nothing
+   * would be a close by another name, and there is already a close.
+   */
+  const SHEET_OPEN = 86;
+  const SHEET_MIN = 25;
+  const SHEET_MAX = 94;
+
+  function sizeSheet(percent: number): void {
+    const held = Math.min(SHEET_MAX, Math.max(SHEET_MIN, percent));
+
+    document.documentElement.style.setProperty("--tethera-sheet", `${held}%`);
+  }
+
+  /**
+   * Drag-to-resize, driven from the grip the library already draws.
+   *
+   * The sheet covers the conversation it came from, and the thing a reader
+   * wants while looking at a file is usually the message that mentioned it. A
+   * fixed height answers "open it bigger" and not "let me see behind it".
+   *
+   * Delegated from the window rather than bound to the element: the sheet is
+   * the console library's and this workspace does not edit it, so there is
+   * nothing of ours to put a handler on. A build of theirs that renames the
+   * grip loses the drag and keeps the sheet, which is the right way for this to
+   * fail.
+   */
+  function onGrip(event: PointerEvent): void {
+    const target = event.target as HTMLElement | null;
+
+    if (!target?.closest?.(".tc-fv__grip")) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const drag = (moved: PointerEvent) =>
+      sizeSheet(((window.innerHeight - moved.clientY) / window.innerHeight) * 100);
+
+    const done = () => {
+      window.removeEventListener("pointermove", drag);
+      window.removeEventListener("pointerup", done);
+      window.removeEventListener("pointercancel", done);
+    };
+
+    window.addEventListener("pointermove", drag);
+    window.addEventListener("pointerup", done);
+    window.addEventListener("pointercancel", done);
+  }
+
   onMount(() => {
     ticking = setInterval(() => (now = Date.now()), 1000);
 
+    sizeSheet(SHEET_OPEN);
+    window.addEventListener("pointerdown", onGrip);
+
     void begin();
     void downloads.attach();
+    void tree.open();
+    void terminals.loadControls();
   });
 
   onDestroy(() => {
@@ -69,12 +164,14 @@
       clearInterval(ticking);
     }
 
+    window.removeEventListener("pointerdown", onGrip);
     stopProgress?.();
     // Only the listener. The transfers themselves are not this screen's to
     // stop: leaving a conversation is not a decision to abandon a file that is
     // halfway to this phone.
     downloads.cleanup();
     void manager.close();
+    tree.close();
   });
 
   async function begin(): Promise<void> {
@@ -112,12 +209,51 @@
     following = slack < 80;
   }
 
+  // Not `$state`: the tail-follow effect reads it, and a reactive flag would
+  // make that effect re-run on the way back out and scroll the reader away
+  // after all.
+  let anchoring = false;
+
+  /**
+   * Loads older turns without moving what the reader is looking at.
+   *
+   * Two things go wrong if this is left to the effect below. Prepending grows
+   * `scrollHeight`, so a box that keeps its `scrollTop` is suddenly showing a
+   * different part of the conversation. And the effect keys on the turn
+   * *count*, which prepending changes too — so asking for history scrolled to
+   * the end of it, and the way back to what you were reading was to scroll
+   * down and then up again.
+   *
+   * The distance from the bottom is what is held fixed, because that is what
+   * the reader is anchored to: everything added went on above them.
+   */
+  async function earlier(): Promise<void> {
+    if (!doc) {
+      await manager.older();
+
+      return;
+    }
+
+    anchoring = true;
+
+    const fromBottom = doc.scrollHeight - doc.scrollTop;
+
+    try {
+      await manager.older();
+      await tick();
+
+      doc.scrollTop = doc.scrollHeight - fromBottom;
+    } finally {
+      anchoring = false;
+    }
+  }
+
   // Depends on the count, so it runs when a turn arrives rather than whenever an
   // unrelated store changes.
   const arrived = $derived($turns.length);
 
   $effect(() => {
-    if (arrived > 0 && following) {
+    if (arrived > 0 && following && !anchoring) {
       void settle();
     }
   });
@@ -303,6 +439,80 @@
     }
   }
 
+  /**
+   * The terminal side of the same workspace.
+   *
+   * The conversation travels with it: the terminal is a side of *this* session's
+   * workspace rather than a place of its own, so it has to be able to name what
+   * it belongs to and offer the way back.
+   */
+  function toTerminal(): void {
+    const workspace = $conversation?.workspace;
+
+    if (!workspace) {
+      void goto(`/server?id=${encodeURIComponent(server)}`);
+
+      return;
+    }
+
+    void goto(
+      `/terminal?server=${encodeURIComponent(server)}` +
+        `&workspace=${encodeURIComponent(workspace as unknown as string)}` +
+        `&conversation=${encodeURIComponent(id)}`,
+    );
+  }
+
+  /**
+   * Pulls the desk to the workspace and tab this session is running in.
+   *
+   * One call, and it is the one the terminal screen already makes on a tab tap:
+   * `tab focus` moves the focused *workspace* as well when the tab lives in
+   * another one, so there is nothing extra to ask for.
+   *
+   * The tab rather than the pane, because that is the finest grain herdr
+   * offers — `pane focus` takes a direction and not an id. A tab holding three
+   * agents is focused as a tab, and the cursor does not land in C2.
+   */
+  async function pullDesk(): Promise<void> {
+    const tab = mine?.tab_id as unknown as string | undefined;
+
+    if (!tab) {
+      return;
+    }
+
+    try {
+      await invoke("focus_tab", { server, tab });
+    } catch (error) {
+      console.error("the desk did not move to this session", error);
+    }
+  }
+
+  /** Switches this screen to another agent in the same tab. */
+  function toChat(conversation: string): void {
+    mapping = false;
+
+    void goto(
+      `/conversation?server=${encodeURIComponent(server)}` +
+        `&id=${encodeURIComponent(conversation)}`,
+    );
+  }
+
+  async function split(pane: string, direction: unknown): Promise<void> {
+    try {
+      await invoke("split_pane", { server, pane, direction });
+    } catch (error) {
+      console.error("could not split this pane", error);
+    }
+  }
+
+  async function closePane(pane: string): Promise<void> {
+    try {
+      await invoke("close_pane", { server, pane });
+    } catch (error) {
+      console.error("could not close this pane", error);
+    }
+  }
+
   async function resume(): Promise<void> {
     if (await manager.resume()) {
       stopped = false;
@@ -451,6 +661,25 @@
     refused: string | null;
   } | null>(null);
 
+  /**
+   * Whether a file should be drawn as a page rather than as its source.
+   *
+   * `previewKind` folds `text/html` in with plain text, which is the right
+   * answer for a library that will not execute what it is given. This app
+   * renders it in a sandboxed frame instead, so it needs to recognise the kind
+   * the library does not name.
+   *
+   * The served type decides, and the extension is only a fallback for the
+   * machines that answer `application/octet-stream` for everything.
+   */
+  function isHtml(name: string, mime: string | null): boolean {
+    if (mime) {
+      return mime.toLowerCase().includes("html");
+    }
+
+    return /\.x?html?$/i.test(name);
+  }
+
   async function open(asset: string, name: string, mime: string | null, size: number | null) {
     const kind = previewKind(name, mime);
 
@@ -464,7 +693,7 @@
       return;
     }
 
-    const head = await manager.preview(asset, PREVIEW_BYTES, mime);
+    const head = await manager.preview(asset, TranscriptManager.TEXT_PREVIEW_BYTES, mime);
 
     // The viewer may have been closed while the bytes were arriving, and a
     // different file may have been opened since.
@@ -487,13 +716,14 @@
 </script>
 
 <div class="screen">
-  <NavBar {title} {subtitle} onback={() => goto(`/server?id=${encodeURIComponent(server)}`)}>
-    {#snippet actions()}
-      {#if $controls.interrupt && $conversation?.binding}
-        <button class="stop" type="button" onclick={() => manager.interrupt()}>stop</button>
-      {/if}
-    {/snippet}
-  </NavBar>
+  <!--
+    No stop here. There were three on this screen and two of them were
+    redundant; the one that survives sits on the row that says the agent is
+    working, because that is the thing somebody is trying to stop. A stop in the
+    title bar is always present and therefore says nothing about whether there
+    is anything to interrupt.
+  -->
+  <NavBar {title} {subtitle} onback={() => goto(`/server?id=${encodeURIComponent(server)}`)} />
 
   <div class="head">
     {#if $conversation}
@@ -516,7 +746,7 @@
   <div class="doc" bind:this={doc} onscroll={onScroll}>
     {#if $hasEarlier}
       <div class="earlier">
-        <Button variant="quiet" disabled={$loading} onclick={() => manager.older()}>
+        <Button variant="quiet" disabled={$loading} onclick={() => void earlier()}>
           {$loading ? "Loading…" : "Earlier"}
         </Button>
       </div>
@@ -650,6 +880,18 @@
           <BrailleSpinner />
           <span class="verb">Working</span>
           <span class="since">{Parts.waited(Number($conversation?.last_active ?? now), now)}</span>
+
+          <!--
+            The same stop `ThinkingRow` carries once the figures arrive. Without
+            it there is a window at the start of every turn - the whole of it,
+            for an agent that never reports stats - where an agent is visibly
+            working and nothing on screen will stop it.
+          -->
+          {#if $controls.interrupt}
+            <button class="halt" type="button" onclick={() => manager.interrupt()}>
+              esc to stop
+            </button>
+          {/if}
         </div>
       {/if}
     {/if}
@@ -699,13 +941,34 @@
         </Button>
       {/snippet}
       {#if !viewing.refused}
-        <FilePreview
-          name={viewing.name}
-          mime={viewing.preview?.mime ?? viewing.mime}
-          text={viewing.preview?.text ?? null}
-          imageUrl={viewing.preview?.image_data_url ?? null}
-          truncated={viewing.preview?.truncated ?? false}
-        />
+        {#if isHtml(viewing.name, viewing.preview?.mime ?? viewing.mime) && viewing.preview?.text}
+          <HtmlPreview
+            name={viewing.name}
+            source={viewing.preview.text}
+            truncated={viewing.preview.truncated}
+          />
+          <!--
+            A markdown file gets the same table treatment as agent prose. The
+            library renders both through the same parser, so a plan read from a
+            file lost its tables exactly the way a message did.
+          -->
+        {:else if viewing.preview?.text && previewKind(viewing.name, viewing.mime) === "markdown" && MarkdownTables.has(viewing.preview.text)}
+          <div class="mdfile">
+            <MarkdownBody source={viewing.preview.text} />
+
+            {#if viewing.preview.truncated}
+              <span class="cut">first part only · save the file to read it all</span>
+            {/if}
+          </div>
+        {:else}
+          <FilePreview
+            name={viewing.name}
+            mime={viewing.preview?.mime ?? viewing.mime}
+            text={viewing.preview?.text ?? null}
+            imageUrl={viewing.preview?.image_data_url ?? null}
+            truncated={viewing.preview?.truncated ?? false}
+          />
+        {/if}
       {/if}
     </FileViewer>
   {/if}
@@ -802,6 +1065,46 @@
       </div>
     {/if}
 
+    <!--
+      Over the transcript rather than beside it. Three agents in one herdr tab
+      is a valid arrangement, and this is the only way from C1 to C2 without
+      leaving the machine screen and coming back.
+    -->
+    {#if mapping}
+      <div class="mapping">
+        <div class="mapping-head">
+          <span>Panes in this tab</span>
+          <button class="halt" type="button" onclick={() => (mapping = false)}>close</button>
+        </div>
+
+        <LayoutSheet
+          panes={tabPanes}
+          layout={tabLayout}
+          selected={selectedPane}
+          controls={$terminalControls}
+          onselect={(pane) => (selectedPane = pane)}
+          onenter={toTerminal}
+          onchat={toChat}
+          onsplit={(pane, direction) => void split(pane, direction)}
+          onclosepane={(pane) => void closePane(pane)}
+        />
+      </div>
+    {/if}
+
+    <!--
+      One row above the composer, and the composer never moves. The mode key
+      leads to the terminal; the floorplan key is how somebody reaches the other
+      agents sharing this tab, and it is absent below two panes because a badge
+      reading one says nothing.
+    -->
+    <ComposerRail
+      mode="chat"
+      onmode={toTerminal}
+      onfocus={mine !== null && $terminalControls.focus_tab ? pullDesk : null}
+      onmap={tabLayout === null || tabPanes.length < 2 ? null : () => (mapping = true)}
+      mapBadge={Floorplan.agents(tabPanes)}
+    />
+
     <Composer
       value={draft}
       placeholder={waitingOn && $controls.answer
@@ -836,6 +1139,75 @@
 </div>
 
 <style lang="scss">
+  // A file preview must have one scroller, not two nested inside each other.
+  //
+  // The console library gives `.tc-fp__code` both `flex: 1` and
+  // `overflow-y: auto`, which makes the code its own scrolling box inside the
+  // viewer's. On a phone a drag that starts over the code moves the code and
+  // never the sheet, so a reader who lands on a long file cannot get out of it
+  // by scrolling — which is what a code block appearing to trap the page is.
+  //
+  // Letting the code take its natural height and moving the scroll up to the
+  // container leaves exactly one thing that scrolls.
+  //
+  // Overridden from here rather than corrected in place: `client/src/console/`
+  // is another team's library and this workspace does not edit it. The real fix
+  // belongs upstream in `FilePreview.scss`.
+  // The file sheet opens at the height it is allowed, not the height its
+  // contents happen to want.
+  //
+  // The library gives the sheet a `max-height` and no `height`, so it is sized
+  // by its contents: a preview that does not stretch leaves the sheet halfway
+  // up the screen with the transcript showing under it, and a long document
+  // then reads through a letterbox. Taking their own maximum as the height
+  // opens it the same way every time, whatever is inside.
+  //
+  // Overridden from here rather than corrected in place: `client/src/console/`
+  // is another team's library and this workspace does not edit it.
+  :global(.tc-fv.is-sheet) {
+    height: var(--tethera-sheet, 86%);
+  }
+
+  // The grip is 30x4 - a thumb cannot land on that. The pad is invisible and
+  // only widens what counts as a hit; `touch-action` stops the drag being
+  // stolen by the scroll underneath it.
+  :global(.tc-fv__grip) {
+    touch-action: none;
+    cursor: ns-resize;
+  }
+
+  :global(.tc-fv__grip)::after {
+    content: "";
+    position: absolute;
+    inset: -16px -60px;
+  }
+
+  :global(.tc-fp) {
+    overflow-y: auto;
+  }
+
+  .mdfile {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .cut {
+    flex: none;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+
+  :global(.tc-fp__code) {
+    flex: none;
+    overflow-y: visible;
+  }
+
   .over {
     position: fixed;
     z-index: 7;
@@ -1001,7 +1373,28 @@
     padding-bottom: 10px;
   }
 
-  .stop {
+  // Over the transcript, above the rail, and bounded so a tab with many panes
+  // scrolls its own map rather than pushing the composer off the screen.
+  .mapping {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    max-height: 58dvh;
+    overflow: hidden;
+    border-top: 1px solid var(--tc-rule);
+    background: var(--tc-bg);
+  }
+
+  .mapping-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px 0;
+    font-size: 12px;
+    color: var(--tc-ink-2);
+  }
+
+  .halt {
     font-family: var(--tc-mono);
     font-size: 9.5px;
     letter-spacing: 0.1em;

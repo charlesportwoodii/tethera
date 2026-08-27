@@ -6,7 +6,7 @@ use crate::structs::agent::AgentProfile;
 use crate::structs::asset::AssetCard;
 use crate::structs::conversation::Conversation;
 use crate::structs::primitives::Cursor;
-use crate::structs::terminal::{Pane, Tab, Workspace};
+use crate::structs::terminal::{Pane, Tab, TabLayout, Workspace};
 use crate::structs::transcript::Turn;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -87,6 +87,7 @@ pub enum Payload {
     Assets(Page<AssetCard>),
     /// Nothing to return, and it worked.
     Ack,
+    Layout(TabLayout),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

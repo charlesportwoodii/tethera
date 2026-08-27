@@ -243,12 +243,18 @@ impl MachinePort for LiveMachine {
             Err(error) => return Err(error),
         };
 
-        let (workspaces, tabs, panes) = terminal.unwrap_or_default();
+        // Every rank from one read, layouts included. A per-tab layout call here
+        // would be one `herdr api snapshot` per tab on a two-second timer, and
+        // the error it could return would have to be folded into "this tab has
+        // no geometry" — which is a confident negative rather than a read that
+        // failed. The `Err` arm above already draws that distinction once.
+        let tree = terminal.unwrap_or_default();
 
         let snapshot = TreeSnapshot {
-            workspaces,
-            tabs,
-            panes,
+            workspaces: tree.workspaces,
+            tabs: tree.tabs,
+            panes: tree.panes,
+            layouts: tree.layouts,
             conversations: self
                 .conversations
                 .list(ConversationFilter::All, None, Self::TREE_CONVERSATIONS)

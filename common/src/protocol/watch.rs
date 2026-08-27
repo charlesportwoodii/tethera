@@ -1,7 +1,7 @@
 use crate::structs::conversation::{AgentStats, Conversation};
 use crate::structs::ids::{ConversationId, PaneId, QuestionId, TabId, WorkspaceId};
 use crate::structs::primitives::Cursor;
-use crate::structs::terminal::{Pane, Tab, Workspace};
+use crate::structs::terminal::{Pane, Tab, TabLayout, Workspace};
 use crate::structs::transcript::{Question, Turn};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -38,6 +38,10 @@ pub enum WatchOpen {
         tabs: Vec<Tab>,
         panes: Vec<Pane>,
         conversations: Vec<Conversation>,
+        /// One per tab the backend could place. A tab absent from this list has
+        /// no geometry the machine will vouch for, and the client draws no map
+        /// for it rather than an invented one.
+        layouts: Vec<TabLayout>,
     },
     Conversation {
         conversation: Conversation,
@@ -87,8 +91,18 @@ pub enum WatchEvent {
     /// own elapsed count and this does not have to arrive once a second to move
     /// a number the client could move itself.
     ///
-    /// Last, and it has to stay last. postcard encodes a variant by its index,
-    /// so putting this anywhere else renumbers every variant after it and a
-    /// client already shipped decodes one event as another.
+    /// Appended, like every variant here. postcard encodes a variant by its
+    /// index, so a variant may be added at the end and nowhere else: inserting
+    /// one renumbers every variant after it and a client already shipped
+    /// decodes one event as another.
     Stats(AgentStats),
+    /// A tab's panes moved, or were added to, or were removed from.
+    ///
+    /// Whole rather than a delta. A layout is small, and a delta against a
+    /// layout the client may have missed is a hole it cannot see.
+    ///
+    /// There is no matching removal event. A layout disappears because its tab
+    /// did, and `TabRemoved` already said so; a second event naming a tab that
+    /// is gone would ask the client to draw a map for nothing.
+    LayoutChanged(TabLayout),
 }

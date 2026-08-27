@@ -1,15 +1,18 @@
 pub mod error;
 pub mod herdr;
+pub mod tree;
 
 pub use error::BackendError;
 pub use herdr::HerdrBackend;
+pub use tree::BackendTree;
 
 use crate::terminal::{PaneRegistry, PtyBackend};
 use std::sync::Arc;
 use tethera_common::protocol::terminal::{Key, Mods};
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
-use tethera_common::structs::terminal::{Pane, Size, SplitDirection, Tab, Workspace};
+use tethera_common::protocol::view::PaneView;
+use tethera_common::structs::terminal::{Pane, Size, SplitDirection, Tab, TabLayout, Workspace};
 use tethera_common::traits::TerminalBackendTrait;
 
 pub enum TerminalBackend {
@@ -32,8 +35,52 @@ impl TerminalBackend {
     ///
     /// What `terminal_attach` and `terminal_input` are advertised on, so a
     /// machine never offers a control that its port would refuse.
+    ///
+    /// True for both, by different means. A pty publishes its own bytes; a herdr
+    /// pane is read on a timer and the difference between two reads is fed to
+    /// the same emulator. Neither is visible above this line.
     pub fn can_attach(&self) -> bool {
-        matches!(self, Self::Pty(_))
+        true
+    }
+
+    /// Whether this backend has a layout engine to split.
+    ///
+    /// Separate from `can_attach`, which used to stand in for it back when only
+    /// one backend could do either. A pty backend has no layout to ask, so it
+    /// refuses a split and must not advertise one.
+    pub fn can_split(&self) -> bool {
+        matches!(self, Self::Herdr(_))
+    }
+
+    /// Whether this backend can return output with its wrapping removed.
+    ///
+    /// Only herdr can. A pty's bytes are already laid out for the pty's own
+    /// width, and un-wrapping them would need the emulator to record which line
+    /// breaks were autowrap and which were real - which `Buffer` does not track.
+    /// So a pty offers the pane as it stands and nothing else, and the client is
+    /// told rather than left to find out by switching to a view that silently
+    /// gives back the other one.
+    pub fn can_lines_view(&self) -> bool {
+        matches!(self, Self::Herdr(_))
+    }
+
+    /// A pane's current content, with styles, for the read loop above.
+    ///
+    /// Only herdr answers this. A pty pane is already streaming its own bytes,
+    /// so asking would be asking the wrong question rather than asking for
+    /// something unavailable, and the error says so.
+    pub fn read_screen(
+        &self,
+        pane: &PaneId,
+        view: PaneView,
+        lines: u16,
+    ) -> Result<String, BackendError> {
+        match self {
+            Self::Herdr(b) => b.read_screen(pane, view, lines),
+            Self::Pty(_) => Err(BackendError::message(
+                "a pty pane publishes its own bytes and is never read on a timer".to_string(),
+            )),
+        }
     }
 
     /// The geometry a pane gets when the backend cannot observe its own.
@@ -49,11 +96,33 @@ impl TerminalBackend {
     /// `TerminalBackendTrait` has no snapshot method, and adding one would
     /// oblige every adapter to have a single-call form. This is inherent, so an
     /// adapter that cannot do it in one call is free not to offer it.
-    pub fn tree(&self) -> Result<(Vec<Workspace>, Vec<Tab>, Vec<Pane>), BackendError> {
+    pub fn tree(&self) -> Result<BackendTree, BackendError> {
         match self {
             Self::Herdr(b) => b.tree(),
             Self::Pty(b) => b.tree(),
         }
+    }
+
+    /// Whether this backend's panes are read on a timer rather than pushing
+    /// their own bytes.
+    ///
+    /// What decides who owns a pane's feed. A pty adopts its pane into the
+    /// registry when it opens it and streams into it for life; a herdr pane has
+    /// no byte stream at all and is polled by a `HerdrSource` that starts at the
+    /// first attach. Asking `registry.holds` instead conflates the two: it is
+    /// true for a pty pane from the moment it exists, and true for a herdr pane
+    /// only once somebody has looked at it.
+    pub fn is_pulled(&self) -> bool {
+        matches!(self, Self::Herdr(_))
+    }
+
+    /// Whether this backend has a window whose focus a client could move.
+    ///
+    /// Not implied by `can_split`. A pty's panes are this process's own and
+    /// nothing displays them, so there is no focus to move even though the two
+    /// answers happen to coincide today.
+    pub fn can_focus(&self) -> bool {
+        matches!(self, Self::Herdr(_))
     }
 
     /// One page of a pane's history, oldest first, with the cursor for the
@@ -88,6 +157,20 @@ impl TerminalBackendTrait for TerminalBackend {
         match self {
             Self::Herdr(b) => b.create_workspace(name),
             Self::Pty(b) => b.create_workspace(name),
+        }
+    }
+
+    fn tab_layout(&self, tab_id: &TabId) -> anyhow::Result<TabLayout> {
+        match self {
+            Self::Herdr(b) => b.tab_layout(tab_id),
+            Self::Pty(b) => b.tab_layout(tab_id),
+        }
+    }
+
+    fn focus_tab(&self, tab_id: &TabId) -> anyhow::Result<()> {
+        match self {
+            Self::Herdr(b) => b.focus_tab(tab_id),
+            Self::Pty(b) => b.focus_tab(tab_id),
         }
     }
 

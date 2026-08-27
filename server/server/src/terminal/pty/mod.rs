@@ -9,10 +9,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tethera_common::protocol::terminal::{Key, Mods};
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
-use tethera_common::structs::terminal::{Pane, Size, SplitDirection, Tab, Workspace};
+use tethera_common::structs::terminal::{
+    Pane, PaneRect, PaneSlot, Size, SplitDirection, Tab, TabLayout, Workspace,
+};
 use tethera_common::traits::{AgentTrait, TerminalBackendTrait};
 
-use crate::backend::BackendError;
+use crate::backend::{BackendError, BackendTree};
 use crate::terminal::keys::KeyEncoder;
 use crate::terminal::registry::PaneRegistry;
 
@@ -159,7 +161,7 @@ impl PtyBackend {
     }
 
     /// Every rank of this backend's tree, for the port above.
-    pub fn tree(&self) -> Result<(Vec<Workspace>, Vec<Tab>, Vec<Pane>), BackendError> {
+    pub fn tree(&self) -> Result<BackendTree, BackendError> {
         self.reap();
 
         let held = self.panes();
@@ -186,13 +188,53 @@ impl PtyBackend {
 
         drop(held);
 
-        Ok((vec![self.workspace()], tabs, panes))
+        Ok(BackendTree {
+            workspaces: vec![self.workspace()],
+            tabs,
+            panes,
+            // This backend has no layout engine, so it places nothing. An empty
+            // list is the true answer about it rather than a read that failed.
+            layouts: Vec::new(),
+        })
     }
 }
 
 impl TerminalBackendTrait for PtyBackend {
     fn list_workspaces(&self) -> anyhow::Result<Vec<Workspace>> {
         Ok(vec![self.workspace()])
+    }
+
+    /// A pty tab has exactly the geometry of its one pane, and none at all past
+    /// that.
+    ///
+    /// This backend owns no split tree. Reporting a made-up arrangement for two
+    /// panes would put a map on screen that somebody would trust, so the second
+    /// pane is an error instead. `pane_layout` is not advertised for a machine
+    /// running this backend, so a client never asks in the first place.
+    fn tab_layout(&self, tab_id: &TabId) -> anyhow::Result<TabLayout> {
+        let panes = self.list_panes(tab_id)?;
+
+        let [pane] = panes.as_slice() else {
+            anyhow::bail!(
+                "this backend tracks no geometry for a tab of {} panes",
+                panes.len()
+            );
+        };
+
+        Ok(TabLayout {
+            tab: tab_id.clone(),
+            slots: vec![PaneSlot {
+                pane: pane.id.clone(),
+                rect: PaneRect::new(0, 0, pane.size.cols, pane.size.rows),
+            }],
+            zoomed: None,
+        })
+    }
+
+    /// Nothing here has focus to move: these panes are this process's own and
+    /// no window shows them.
+    fn focus_tab(&self, _tab_id: &TabId) -> anyhow::Result<()> {
+        anyhow::bail!("this backend has no focus to move")
     }
 
     /// There is one workspace and it always exists.
@@ -211,9 +253,7 @@ impl TerminalBackendTrait for PtyBackend {
             .into());
         }
 
-        let (_, tabs, _) = self.tree()?;
-
-        Ok(tabs)
+        Ok(self.tree()?.tabs)
     }
 
     fn list_panes(&self, tab_id: &TabId) -> anyhow::Result<Vec<Pane>> {

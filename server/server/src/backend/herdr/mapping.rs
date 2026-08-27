@@ -1,9 +1,11 @@
 use super::ids::HerdrIds;
-use super::wire::{AgentSession, AgentSessionKind, PaneInfo, Snapshot, WorkspaceInfo};
+use super::wire::{AgentSession, AgentSessionKind, PaneInfo, PaneLayout, Snapshot, WorkspaceInfo};
 use std::collections::BTreeMap;
 use tethera_common::structs::agent::Agent;
-use tethera_common::structs::ids::{ConversationId, ProfileId};
-use tethera_common::structs::terminal::{Pane, Size, Tab, Workspace};
+use tethera_common::structs::ids::{ConversationId, ProfileId, TabId};
+use tethera_common::structs::terminal::{
+    Pane, PaneRect, PaneSlot, Size, Tab, TabLayout, Workspace,
+};
 use tethera_common::traits::agent::AgentTrait;
 
 /// herdr pane id to the command running in it, for the panes that needed a
@@ -149,6 +151,43 @@ impl Mapping {
         Self::text(info.display_agent.as_deref())
             .or_else(|| Self::text(info.agent.as_deref()))
             .or_else(|| foreground.get(&info.pane_id).cloned())
+    }
+
+    /// herdr's layout for one tab, as ours.
+    ///
+    /// Coordinates are carried through unchanged. herdr reports them against
+    /// the whole screen, and the client normalises against the union of the
+    /// slots it receives, so shifting the origin here would only move the
+    /// arithmetic somewhere it cannot see the other tabs.
+    pub fn layout(herdr: &PaneLayout, tab: &TabId) -> TabLayout {
+        let slots: Vec<PaneSlot> = herdr
+            .panes
+            .iter()
+            .map(|pane| PaneSlot {
+                pane: HerdrIds::pane(&pane.pane_id),
+                rect: PaneRect::new(
+                    pane.rect.x,
+                    pane.rect.y,
+                    pane.rect.width,
+                    pane.rect.height,
+                ),
+            })
+            .collect();
+
+        // A zoom naming a pane this layout does not place is a zoom nobody can
+        // act on. herdr reports the flag and the pane separately, so the two can
+        // disagree, and the map would otherwise zoom onto a rectangle it is not
+        // drawing.
+        let zoomed = herdr
+            .zoomed
+            .then(|| HerdrIds::pane(&herdr.focused_pane_id))
+            .filter(|pane| slots.iter().any(|slot| &slot.pane == pane));
+
+        TabLayout {
+            tab: tab.clone(),
+            slots,
+            zoomed,
+        }
     }
 
     /// herdr's observed geometry, because that is what the pane actually is.

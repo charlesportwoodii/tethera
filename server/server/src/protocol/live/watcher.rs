@@ -79,6 +79,17 @@ impl TreeWatcher {
             &mut events,
         );
 
+        // Not a `diff_rank` call: there is no removal event for a layout. A
+        // layout disappears because its tab did, and `TabRemoved` above already
+        // said so; a second event naming a tab that is gone would ask the client
+        // to draw a map for nothing.
+        for layout in &next.layouts {
+            match previous.layout_of(&layout.tab) {
+                Some(held) if held == layout => {}
+                _ => events.push(WatchEvent::LayoutChanged(layout.clone())),
+            }
+        }
+
         events
     }
 

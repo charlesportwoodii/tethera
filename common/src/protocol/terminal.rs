@@ -1,4 +1,6 @@
+use crate::protocol::view::PaneView;
 use crate::structs::ids::PaneId;
+use crate::structs::terminal::Size;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -92,6 +94,17 @@ pub enum CloseReason {
 #[ts(export, export_to = "./../../client/src/js/bindings/")]
 pub struct AttachSpec {
     pub pane: PaneId,
+    pub view: PaneView,
+    /// What the client can draw.
+    ///
+    /// Honoured in `Lines`, where the server lays logical lines out to this
+    /// width so the client never scrolls sideways. Ignored in `Screen`, where
+    /// the pane's own geometry is the only correct one and the client refits.
+    ///
+    /// Carried on the attach because it is the only message that knows it, and
+    /// because the alternative - resizing the pane to suit the phone - reflows
+    /// it on the desk as well.
+    pub viewport: Size,
 }
 
 /// What the server sends on an attach stream.

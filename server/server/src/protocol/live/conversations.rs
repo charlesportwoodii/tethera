@@ -64,6 +64,26 @@ impl LiveConversations {
     /// `AgentTrait`, so a second is another arm and no change here.
     const READS: Agent = Agent::Claude;
 
+    /// The screen reader for the harness this build drives.
+    ///
+    /// `None` for one nobody has measured, which means its screens are not read
+    /// rather than read with the wrong glyphs.
+    fn detector() -> Option<PromptDetector> {
+        PromptDetector::for_agent(Self::READS)
+    }
+
+    /// The picker driver for that harness.
+    ///
+    /// An unmeasured harness refuses rather than pressing keys at a screen
+    /// nobody has looked at. `questions` is the capability being declined,
+    /// which is the honest name for what a client just asked for and cannot
+    /// have here.
+    fn picker() -> Result<Picker, WireError> {
+        Picker::for_agent(Self::READS).ok_or(WireError::Unsupported {
+            capability: CapabilityId(capability::QUESTIONS.to_string()),
+        })
+    }
+
     /// How much of a conversation's tail decides its status and its preview.
     const TAIL: u16 = 16;
 
@@ -327,13 +347,12 @@ impl LiveConversations {
     ) -> Result<Conversation, WireError> {
         if let Some(described) = self
             .locate(&id)
-            .map(|path| self.describe(path, Some(pane.id.clone())))
+            .map(|path| {
+                self.describe(path, Some((pane.id.clone(), pane.workspace_id.clone())))
+            })
         {
             if let Some(conversation) = described.await {
-                return Ok(Conversation {
-                    workspace: Some(pane.workspace_id.clone()),
-                    ..conversation
-                });
+                return Ok(conversation);
             }
         }
 
@@ -440,7 +459,8 @@ impl LiveConversations {
 
             let screen = self.terminals.screen(pane).await?;
 
-            let unchanged = PromptDetector::detect(&screen)
+            let unchanged = Self::detector()
+                .and_then(|detector| detector.detect(&screen))
                 .is_some_and(|still| still.fingerprint == answered.fingerprint);
 
             if !unchanged {
@@ -474,16 +494,18 @@ impl LiveConversations {
     /// harness's business, and a rule inferred from today's would one day press
     /// `1` into whatever else is there.
     async fn submit_review(&self, pane: &PaneId) -> Result<(), WireError> {
+        let picker = Self::picker()?;
+
         for _ in 0..Self::REVIEW_READS {
             if self
                 .terminals
                 .screen(pane)
                 .await?
-                .contains(Picker::REVIEW_MARKER)
+                .contains(picker.review_marker())
             {
                 return self
                     .terminals
-                    .send_key(pane, Picker::SUBMIT, Mods::NONE)
+                    .send_key(pane, picker.submit(), Mods::NONE)
                     .await;
             }
 
@@ -608,7 +630,7 @@ impl LiveConversations {
 
         self.bindings()
             .get(id)
-            .cloned()
+            .map(|(pane, _)| pane.clone())
             .ok_or_else(|| WireError::NotRunning {
                 conversation: id.clone(),
             })
@@ -703,23 +725,54 @@ impl LiveConversations {
         })?
     }
 
-    /// Which pane each conversation is running in, as of the last tree read.
+    /// Which pane each conversation is running in, and the workspace holding
+    /// that pane, as of the last tree read.
     ///
     /// A read of the terminal port's memory, never a second backend call: a tree
     /// render already made one immediately before asking for this rank.
-    fn bindings(&self) -> HashMap<ConversationId, PaneId> {
-        self.terminals
-            .bindings()
+    ///
+    /// The workspace travels with the pane rather than being looked up again
+    /// later, because the two are one fact and reading them apart is how they
+    /// come to disagree.
+    fn bindings(&self) -> HashMap<ConversationId, (PaneId, WorkspaceId)> {
+        Self::bindings_of(self.terminals.panes())
+    }
+
+    /// The same mapping, over panes handed in.
+    ///
+    /// An associated function taking its input rather than a method reading the
+    /// port, because what it decides — that a conversation running in a pane
+    /// carries that pane's workspace — is only reachable through a live agent
+    /// announcing its session, and a rule that can only be exercised with a real
+    /// harness attached is a rule nothing checks.
+    pub fn bindings_of(panes: Vec<Pane>) -> HashMap<ConversationId, (PaneId, WorkspaceId)> {
+        panes
             .into_iter()
-            .map(|(pane, conversation)| (conversation, pane))
+            .filter_map(|pane| {
+                pane.conversation
+                    .clone()
+                    .map(|conversation| (conversation, (pane.id, pane.workspace_id)))
+            })
             .collect()
     }
 
     async fn describe(
         &self,
         path: PathBuf,
-        binding: Option<PaneId>,
+        binding: Option<(PaneId, WorkspaceId)>,
     ) -> Option<Conversation> {
+        // Split once, here, so every caller gets a workspace rather than the one
+        // that remembered to add it. The start path used to patch it in
+        // afterwards and the list and get paths did not, so a session that was
+        // running in a pane still reached the client with no workspace - which
+        // is indistinguishable from one that has no pane at all, and it is the
+        // difference between offering the terminal side of a session and hiding
+        // it.
+        let (binding, workspace) = match binding {
+            Some((pane, workspace)) => (Some(pane), Some(workspace)),
+            None => (None, None),
+        };
+
         let catalog = self.catalog.clone();
         let summary =
             tokio::task::spawn_blocking(move || catalog.summarise(&path)).await.ok()??;
@@ -762,9 +815,10 @@ impl LiveConversations {
             title,
             preview,
             cwd,
-            // The workspace a conversation belongs to is the pane's, and an
-            // unbound conversation has no pane. Absent rather than guessed.
-            workspace: None,
+            // The pane's, because that is whose it is. Absent only when there
+            // is no pane, which is the one case where absent is the truth
+            // rather than an omission.
+            workspace,
             started_at: summary.started_at.unwrap_or(Timestamp(0)),
             last_active: summary.last_active,
             // A count nobody measured is not zero. Reading every session whole
@@ -1227,7 +1281,7 @@ impl ConversationPort for LiveConversations {
             return Err(WireError::Stale);
         }
 
-        let steps = Picker::steps(&pending.asks, answers)?;
+        let steps = Self::picker()?.steps(&pending.asks, answers)?;
         let pane = self.running_in(id).await?;
 
         for step in steps {

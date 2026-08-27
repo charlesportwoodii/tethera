@@ -48,6 +48,20 @@ pub const RECENT_CWDS: &str = "recent_cwds";
 pub const TERMINAL_ATTACH: &str = "terminal_attach";
 pub const TERMINAL_INPUT: &str = "terminal_input";
 pub const TERMINAL_SCROLLBACK: &str = "terminal_scrollback";
+/// Whether this machine can return a pane's output with its wrapping removed.
+///
+/// A phone reading a pane laid out for a desk depends on it, and a backend that
+/// only publishes an already-wrapped screen cannot offer it. Advertised so the
+/// view toggle is absent rather than present and silently giving back the other
+/// view.
+pub const TERMINAL_LINES_VIEW: &str = "terminal_lines_view";
+/// Whether this machine will say where a tab's panes sit.
+///
+/// A backend that owns no geometry cannot answer it, and a client that asked
+/// anyway would draw a map of a layout nobody vouched for.
+pub const PANE_LAYOUT: &str = "pane_layout";
+/// Whether a client may move the machine's own focus to a tab.
+pub const TAB_FOCUS: &str = "tab_focus";
 pub const PANE_OPEN: &str = "pane_open";
 pub const PANE_SPLIT: &str = "pane_split";
 pub const PANE_CLOSE: &str = "pane_close";

@@ -1,0 +1,39 @@
+
+
+● The doc comments came through but the code didn't. Let me get the logic itself.
+
+  Ran 1 shell command
+
+❯ 1. This
+  2. That
+  3. foo
+
+● That's the reproduction — thank you. Three consecutive N.  rows in ordinary prose. Let me confirm what the detector does with exactly that.
+
+  Ran 2 shell commands
+
+❯ [Image #1]See example I just forced
+  Attached:
+  ⎿  [Image #1]
+
+● The screenshot changes the diagnosis. Look at what it picked as the question:
+
+  ▎ · Whirring… (27s · ↓ 1.5k tokens · thinking with high effort)
+
+  That's the agent's status spinner, not a question. So the detector matched rows somewhere and then took a line near them as the prompt. Let me read the actual pane rather than guess at the layout.
+
+  Ran 3 shell commands
+
+● Found my own pane — w7X:p1, session id matches this session. Reading its screen:
+
+  Finding which snapshot source the server reads
+  ⎿  $ S="$TMPDIR"; SP="C:/Users/charl/AppData/Local/Temp/claude/C--Users-charl-projects-tethera/81435090-58b5-433e-a445-38b8c6fe946a/scratchpad"; mkdir -p "$SP"; herdr pane read w7X:p1 --source detection --format text >
+     "$SP/live-detection.txt" 2>&1; wc -l "$SP/live-detection.txt"
+
+✽ Whirring… (1m 41s · ↓ 5.1k tokens)
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── Tethera Server Agent ─
+❯
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ◆ Opus 5 (1M context)   ░░░░░░░░ 85k   ✂ 27.7%   ◔ 36m·98% · 5d·56%   ♻ 99% cached                                                                                                                                                      /rc
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent

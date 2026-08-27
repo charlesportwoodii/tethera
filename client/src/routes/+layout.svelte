@@ -2,6 +2,7 @@
   import type { Snippet } from "svelte";
   import { onDestroy, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { page } from "$app/state";
   import "../app.scss";
   import LockScreen from "$components/LockScreen.svelte";
 
@@ -66,7 +67,24 @@
 {:else if locked}
   <LockScreen onopen={() => (locked = false)} />
 {:else}
-  {@render children()}
+  <!--
+    Keyed on the whole URL, so a screen is rebuilt when its parameters change.
+    Every route here reads its parameters once, at construction — `const id =
+    page.url.searchParams.get("id")` — and hands them to a manager that keeps
+    them for life. SvelteKit reuses a component when navigating between two
+    URLs of the *same* route, so without this, opening one conversation from
+    inside another leaves the screen bound to the first: the transcript on
+    screen and the id every send carries stop agreeing, and a prompt reaches
+    the agent somebody was reading a moment ago rather than the one they are
+    looking at.
+
+    Keyed here rather than fixed in each route because it is the routes'
+    shared assumption that is wrong, and a route added later would inherit the
+    same bug without inheriting the remedy.
+  -->
+  {#key page.url.href}
+    {@render children()}
+  {/key}
 {/if}
 
 <style lang="scss">

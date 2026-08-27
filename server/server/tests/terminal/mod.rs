@@ -1,6 +1,7 @@
 mod drift;
 mod emulator;
 mod frames;
+mod herdr;
 mod keys;
 mod picker;
 mod prompt;

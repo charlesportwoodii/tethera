@@ -1,5 +1,6 @@
 use crate::structs::agent::{
-    AgentCapabilities, AgentProfile, AgentSpawn, NoiseFilter, TranscriptSource,
+    AgentCapabilities, AgentProfile, AgentSpawn, CommandTags, NoiseFilter, ScreenChrome,
+    TranscriptSource,
 };
 use std::path::Path;
 
@@ -33,6 +34,16 @@ pub trait AgentTrait {
     /// What this agent records under the person's role that the person did not
     /// say.
     fn noise_filter(&self) -> &'static NoiseFilter;
+
+    /// How this harness records a command a person ran, if anybody has measured
+    /// it. `None` leaves such a record to the noise filter, which is what a
+    /// reader that knows nothing about a harness's command grammar should do.
+    fn command_tags(&self) -> Option<&'static CommandTags>;
+
+    /// What this harness draws on screen, if anybody has measured it. `None`
+    /// means its screens are not read and its pickers are not driven — see
+    /// `ScreenChrome`.
+    fn screen_chrome(&self) -> Option<&'static ScreenChrome>;
 
     /// Tool names that hand a file to the person deliberately.
     ///

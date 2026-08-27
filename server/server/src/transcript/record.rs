@@ -1,5 +1,6 @@
 use super::{Attachment, ContentBlock, Message};
 use serde::Deserialize;
+use tethera_common::structs::agent::CommandTags;
 use tethera_common::structs::primitives::Timestamp;
 use tethera_common::structs::transcript::Role;
 
@@ -45,6 +46,10 @@ pub struct Record {
     /// The shape varies per tool, so only the mapper reads into it.
     #[serde(rename = "toolUseResult", default)]
     pub tool_use_result: Option<serde_json::Value>,
+    /// A system record's body, which sits at the top level rather than under
+    /// `message`. A slash command's own line arrives this way and nowhere else.
+    #[serde(default)]
+    pub content: Option<String>,
     #[serde(rename = "aiTitle", default)]
     pub ai_title: Option<String>,
     /// The name a person gave the session with the harness's own rename
@@ -102,8 +107,27 @@ impl Record {
     /// rather than deeper in, because they are the bulk of the file - measured
     /// at roughly half of every line - and inspecting their text would be work
     /// spent on content nobody typed.
-    pub fn is_turn_candidate(&self) -> bool {
-        self.is_assistant() || self.is_user() || self.is_queued_prompt()
+    pub fn is_turn_candidate(&self, tags: Option<&CommandTags>) -> bool {
+        self.is_assistant()
+            || self.is_user()
+            || self.is_queued_prompt()
+            || self.is_local_command(tags)
+    }
+
+    /// The record the harness writes when a person runs a slash command.
+    ///
+    /// Its body sits at the top level rather than under `message`, which is why
+    /// it reached none of the paths that read a message: the command a person
+    /// ran was not in the transcript at all, and what showed instead was its
+    /// output with no sign of what had produced it.
+    ///
+    /// **Which kind of record that is belongs to the harness**, so it arrives as
+    /// a table rather than being spelled here. An agent nobody has measured has
+    /// no table, and none of its records are read as commands.
+    pub fn is_local_command(&self, tags: Option<&CommandTags>) -> bool {
+        tags.is_some_and(|tags| {
+            self.kind == tags.record_kind && self.subtype.as_deref() == Some(tags.record_subtype)
+        })
     }
 
     /// A message the person typed while the agent was still working.
@@ -158,10 +182,10 @@ impl Record {
         })
     }
 
-    pub fn role(&self) -> Option<Role> {
+    pub fn role(&self, tags: Option<&CommandTags>) -> Option<Role> {
         if self.is_assistant() {
             Some(Role::Agent)
-        } else if self.is_user() || self.is_queued_prompt() {
+        } else if self.is_user() || self.is_queued_prompt() || self.is_local_command(tags) {
             Some(Role::Operator)
         } else {
             None

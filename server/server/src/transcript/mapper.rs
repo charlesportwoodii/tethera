@@ -1,8 +1,11 @@
-use super::{AssetIndex, AssetNaming, ContentBlock, Record, SentFiles, ToolOutcome};
+use super::{
+    AssetIndex, AssetNaming, ContentBlock, MarkdownTables, Record, Segment, SentFiles,
+    SlashCommand, ToolOutcome,
+};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tethera_common::structs::agent::Agent;
+use tethera_common::structs::agent::{Agent, CommandTags};
 use tethera_common::structs::ids::{QuestionId, TurnId};
 use tethera_common::structs::primitives::{Cursor, Timestamp};
 use tethera_common::structs::transcript::{
@@ -67,6 +70,11 @@ impl TurnMapper {
         self.agent
     }
 
+    /// How this harness records a command, if anybody has measured it.
+    fn commands(&self) -> Option<&'static CommandTags> {
+        self.agent.command_tags()
+    }
+
     /// Whether this record can contribute anything to a turn.
     ///
     /// The index calls this so that what it counts and what a page returns are
@@ -74,7 +82,7 @@ impl TurnMapper {
     /// would hand back short pages and a `has_earlier` about entries rather
     /// than about turns.
     pub fn yields_turn(&self, record: &Record) -> bool {
-        if !record.is_turn_candidate() {
+        if !record.is_turn_candidate(self.commands()) {
             return false;
         }
 
@@ -99,6 +107,17 @@ impl TurnMapper {
     /// Whether a `user` record is the person and not the harness wearing their
     /// role.
     fn person_spoke(&self, record: &Record) -> bool {
+        // A command a person ran is something they did, and it carries its own
+        // body rather than a message. It has to clear this gate before any of
+        // the tests below reach for a `message` it does not have.
+        if let Some(tags) = self.commands().filter(|_| record.is_local_command(self.commands())) {
+            return record
+                .content
+                .as_deref()
+                .and_then(|text| SlashCommand::spoken(tags, text))
+                .is_some();
+        }
+
         if record.carries_tool_results() || record.is_meta {
             return false;
         }
@@ -152,7 +171,7 @@ impl TurnMapper {
         outcomes: &HashMap<String, ToolOutcome>,
     ) -> Option<Turn> {
         let first = group.first()?;
-        let role = first.role()?;
+        let role = first.role(self.commands())?;
         let id = TurnId(first.uuid.clone()?);
         let at = first.at().unwrap_or(Timestamp(0));
 
@@ -196,7 +215,7 @@ impl TurnMapper {
         for block in record.blocks() {
             match block {
                 ContentBlock::Text { text } if !text.trim().is_empty() => {
-                    parts.push(Part::Text { text: text.clone() })
+                    Self::prose_parts(text, parts)
                 }
                 ContentBlock::ToolUse { id, name, input } => {
                     parts.extend(self.tool_parts(id, name, input, outcomes.get(id)))
@@ -209,7 +228,78 @@ impl TurnMapper {
         }
     }
 
+    /// Agent prose, with any table in it sent as a table.
+    ///
+    /// `Part::Table` and the client rendering for it both already existed and
+    /// nothing produced one, so a table travelled inside a text part and drew as
+    /// a paragraph of pipes with its newlines collapsed.
+    fn prose_parts(text: &str, parts: &mut Vec<Part>) {
+        for segment in MarkdownTables::split(text) {
+            match segment {
+                Segment::Prose(prose) if prose.trim().is_empty() => {}
+                Segment::Prose(prose) => parts.push(Part::Text { text: prose }),
+                Segment::Table {
+                    columns,
+                    rows,
+                    source,
+                } => parts.push(Part::Table {
+                    columns,
+                    rows,
+                    // The markdown it came from. A peer that does not know this
+                    // variant is sent the table as the text it always was,
+                    // rather than nothing.
+                    fallback_text: source,
+                }),
+            }
+        }
+    }
+
+    /// A slash command as the person's own line, and what it printed.
+    ///
+    /// The output is a fold rather than more prose: `/context` prints a page,
+    /// and a transcript that inlined every one of those would bury the
+    /// conversation it belongs to.
+    fn command_parts(tags: &CommandTags, text: &str, parts: &mut Vec<Part>) {
+        if let Some(spoken) = SlashCommand::spoken(tags, text) {
+            parts.push(Part::Text {
+                text: spoken.clone(),
+            });
+
+            if let Some(printed) = SlashCommand::output(tags, text) {
+                parts.push(Self::command_output(&spoken, printed));
+            }
+
+            return;
+        }
+
+        if let Some(printed) = SlashCommand::output(tags, text) {
+            parts.push(Self::command_output("command output", printed));
+        }
+    }
+
+    fn command_output(name: &str, printed: String) -> Part {
+        Part::ToolUse {
+            name: name.to_string(),
+            input: String::new(),
+            fallback_text: printed.clone(),
+            result: Some(printed),
+            status: ToolStatus::Ok,
+        }
+    }
+
     fn operator_parts(&self, record: &Record, parts: &mut Vec<Part>) {
+        if let Some(tags) = self.commands().filter(|_| record.is_local_command(self.commands())) {
+            if let Some(spoken) = record
+                .content
+                .as_deref()
+                .and_then(|text| SlashCommand::spoken(tags, text))
+            {
+                parts.push(Part::Text { text: spoken });
+            }
+
+            return;
+        }
+
         // The person stopped the agent. Dropping it leaves a response that ends
         // mid-sentence for no visible reason, so it is rendered rather than
         // filtered - and it does not return early, because a record can carry
@@ -229,6 +319,18 @@ impl TurnMapper {
         }
 
         if let Some(text) = record.plain_text() {
+            // Before the filter, because the filter's job is to drop what the
+            // harness wrote under this role and a slash command is the one
+            // shape there that a person actually did.
+            if let Some(tags) = self
+                .commands()
+                .filter(|tags| SlashCommand::is_command(tags, text))
+            {
+                Self::command_parts(tags, text, parts);
+
+                return;
+            }
+
             if !filter.is_noise(text) {
                 self.spoken_parts(text, parts);
             }

@@ -1,10 +1,12 @@
 mod assets;
 mod catalog;
+mod command;
 mod grouping;
 mod index;
 mod mapper;
 mod reader;
 mod sent;
+mod tables;
 
 use std::path::PathBuf;
 use tethera_common::structs::agent::Agent;

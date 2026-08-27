@@ -241,7 +241,8 @@ async fn the_tree_names_every_open_pane() {
         )
         .expect("open");
 
-    let (workspaces, tabs, panes) = backend.tree().expect("tree");
+    let tree = backend.tree().expect("tree");
+    let (workspaces, tabs, panes) = (tree.workspaces, tree.tabs, tree.panes);
 
     assert_eq!(workspaces.len(), 1);
     assert_eq!(tabs.len(), 2);
@@ -397,7 +398,8 @@ async fn a_pane_whose_shell_exits_leaves_the_backend_map() {
     );
 
     // The reap happens on the next read of the map, which is what `tree` does.
-    let (_, tabs, panes) = backend.tree().expect("tree");
+    let tree = backend.tree().expect("tree");
+    let (tabs, panes) = (tree.tabs, tree.panes);
 
     assert!(
         panes.is_empty(),
@@ -461,14 +463,14 @@ async fn a_tab_keeps_its_ordinal_when_an_earlier_pane_closes() {
     let second = backend.open_pane(None, None, size).expect("open");
     let third = backend.open_pane(None, None, size).expect("open");
 
-    let (_, tabs, _) = backend.tree().expect("tree");
+    let tabs = backend.tree().expect("tree").tabs;
     let before: Vec<u16> = tabs.iter().map(|tab| tab.index).collect();
 
     assert_eq!(before, vec![1, 2, 3], "ordinals are not assigned in order");
 
     backend.close(&first.id).expect("close");
 
-    let (_, tabs, _) = backend.tree().expect("tree");
+    let tabs = backend.tree().expect("tree").tabs;
     let after: Vec<u16> = tabs.iter().map(|tab| tab.index).collect();
 
     assert_eq!(
@@ -502,8 +504,8 @@ async fn two_reads_of_an_unchanged_tree_are_identical() {
     let first = backend.tree().expect("tree");
     let second = backend.tree().expect("tree");
 
-    assert_eq!(first.1, second.1, "the tab list is not stable across reads");
-    assert_eq!(first.2, second.2, "the pane list is not stable across reads");
+    assert_eq!(first.tabs, second.tabs, "the tab list is not stable across reads");
+    assert_eq!(first.panes, second.panes, "the pane list is not stable across reads");
 
     for pane in panes {
         backend.close(&pane.id).expect("close");

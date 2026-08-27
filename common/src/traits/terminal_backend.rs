@@ -1,7 +1,7 @@
 use crate::protocol::terminal::{Key, Mods};
 use crate::structs::agent::AgentSpawn;
 use crate::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
-use crate::structs::terminal::{Pane, Size, SplitDirection, Tab, Workspace};
+use crate::structs::terminal::{Pane, Size, SplitDirection, Tab, TabLayout, Workspace};
 
 /// What a terminal multiplexer has to be able to do.
 ///
@@ -22,6 +22,16 @@ pub trait TerminalBackendTrait {
     fn list_tabs(&self, workspace_id: &WorkspaceId) -> anyhow::Result<Vec<Tab>>;
 
     fn list_panes(&self, tab_id: &TabId) -> anyhow::Result<Vec<Pane>>;
+
+    /// Where this tab's panes sit, in cells.
+    ///
+    /// An error rather than an empty layout when the backend does not track
+    /// geometry: a client told "no panes" draws an empty workspace, which is a
+    /// different and wrong statement.
+    fn tab_layout(&self, tab_id: &TabId) -> anyhow::Result<TabLayout>;
+
+    /// Move the backend's own focus to this tab.
+    fn focus_tab(&self, tab_id: &TabId) -> anyhow::Result<()>;
 
     /// Creates a new tab. A second pane inside an existing tab is `split`, which
     /// is the only operation that needs a direction.

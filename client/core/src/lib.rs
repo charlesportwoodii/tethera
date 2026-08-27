@@ -1,3 +1,4 @@
+pub mod attach;
 pub mod book;
 pub mod endpoint;
 pub mod error;

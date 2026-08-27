@@ -4,7 +4,7 @@ pub use sink::LogSink;
 
 use crate::config::ApplicationConfig;
 use tethera_common::logging::{HumanFormatter, JsonFormatter};
-use curia::{ConsoleSink, Dispatcher, FileSink, Level, Logger, TracingBridge};
+use curia::{ConsoleSink, Dispatcher, FileSink, Level, Logger, RotationStrategy, TracingBridge};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -26,6 +26,19 @@ impl Logging {
     /// with traffic that has nothing to do with a question anybody is asking.
     /// `TETHERA_LOG` raises it when the question *is* about them.
     pub const DEPENDENCY_LEVEL: Level = Level::Warn;
+
+    /// Bytes of one log file, and how many are kept beside it.
+    ///
+    /// **curia's defaults are 40 KB and `KeepOne`**, which on this server is
+    /// between two and four minutes of history. That is shorter than the gap
+    /// between something going wrong on an operator's phone and anybody looking
+    /// at the log: block transitions read at one moment were gone by the next
+    /// command, and a question about a flicker on screen could not be answered
+    /// at all. The defaults suit a library writing occasionally; this process
+    /// logs a line per listing while a phone is polling it.
+    const MAX_LOG_BYTES: u64 = 25 * 1024 * 1024;
+
+    const KEPT_LOG_FILES: usize = 5;
 
     pub fn install(config: &ApplicationConfig) -> anyhow::Result<()> {
         let console = ConsoleSink::new(Self::console_level(), HumanFormatter::formatter());
@@ -70,11 +83,15 @@ impl Logging {
     fn file(config: &ApplicationConfig) -> anyhow::Result<FileSink> {
         config.ensure_data_dir()?;
 
-        Ok(FileSink::new(
+        Ok(FileSink::with_rotation(
             config.log_dir(),
             Self::FILE_NAME.to_string(),
             Level::Debug,
             JsonFormatter::formatter(),
+            Self::MAX_LOG_BYTES,
+            RotationStrategy::KeepSome(Self::KEPT_LOG_FILES),
+            curia::DEFAULT_TIMEZONE_STRATEGY,
+            curia::DEFAULT_FILE_OPEN_STRATEGY,
         )?)
     }
 

@@ -133,7 +133,22 @@
     return new Date(Number(candidate.entry.last_seen_at)).toLocaleString();
   }
 
+  /**
+   * Opens whichever side this session actually has.
+   *
+   * A session with no readable transcript has nothing to render as chat, so it
+   * opens at its terminal rather than at an empty screen that blames the
+   * machine for it.
+   */
   function read(conversation: Conversation): void {
+    if (!conversation.has_transcript && conversation.workspace) {
+      const held = encodeURIComponent(conversation.workspace as unknown as string);
+
+      void goto(`/terminal?server=${encodeURIComponent(id)}&workspace=${held}`);
+
+      return;
+    }
+
     const held = encodeURIComponent(conversation.id as unknown as string);
 
     void goto(`/conversation?server=${encodeURIComponent(id)}&id=${held}`);
@@ -237,12 +252,13 @@
 {/if}
 
 {#snippet twig(conversation: Conversation)}
-  <!-- A conversation with no readable transcript has nothing to open. The
-       terminal is what that one offers, and that screen does not exist yet. -->
+  <!-- A conversation with no readable transcript has no chat to open, but it
+       still has a pane. That one opens the terminal instead, which is what the
+       Chat/Terminal split means for a session nothing wrote down. -->
   <button
     class="open"
     type="button"
-    disabled={!conversation.has_transcript}
+    disabled={!conversation.has_transcript && !conversation.workspace}
     onclick={() => read(conversation)}
   >
     <div class="head">
@@ -257,7 +273,9 @@
       <div class="said">“{Parts.plain(conversation.preview)}”</div>
     {/if}
     {#if !conversation.has_transcript}
-      <div class="meta">no readable transcript</div>
+      <div class="meta">
+        {conversation.workspace ? "terminal only — nothing wrote a transcript" : "no readable transcript"}
+      </div>
     {/if}
   </button>
 {/snippet}

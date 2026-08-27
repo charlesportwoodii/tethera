@@ -1,9 +1,15 @@
+mod layout;
 mod pane;
+mod rect;
 mod size;
+mod slot;
 mod tab;
 
+pub use layout::TabLayout;
 pub use pane::Pane;
+pub use rect::PaneRect;
 pub use size::{Size, SplitDirection};
+pub use slot::PaneSlot;
 pub use tab::Tab;
 
 use crate::structs::ids::{ConversationId, WorkspaceId};

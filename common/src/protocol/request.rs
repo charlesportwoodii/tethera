@@ -143,4 +143,22 @@ pub enum Request {
     /// token to forget: the endpoint id is the identity, so revoking removes the
     /// identity itself.
     RevokeThisDevice,
+
+    /// Where the panes of a tab sit, in cells.
+    ///
+    /// Its own request rather than a field on `Pane`, because the backend reads
+    /// it from a different call and it changes on a different clock: one split
+    /// moves every neighbour without altering any pane's identity.
+    PaneLayout {
+        tab: TabId,
+    },
+    /// Move the machine's own focus to this tab.
+    ///
+    /// The one place a client is allowed to move something on the desk. It is
+    /// here because the phone is a second window onto one session rather than a
+    /// separate session: a tab changed on the phone and not on the desk makes
+    /// the handoff a copy.
+    FocusTab {
+        tab: TabId,
+    },
 }

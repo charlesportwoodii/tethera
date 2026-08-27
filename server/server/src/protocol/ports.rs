@@ -1,7 +1,9 @@
 use tethera_common::protocol::error::WireError;
 use tethera_common::protocol::handshake::{DeviceRecord, ServerInfo};
 use tethera_common::protocol::response::{ConversationPreview, Describe, Page};
-use tethera_common::protocol::terminal::{RowUpdate, Style, TerminalFrame, TerminalInput};
+use tethera_common::protocol::terminal::{
+    AttachSpec, RowUpdate, Style, TerminalFrame, TerminalInput,
+};
 use tethera_common::protocol::transfer::{FetchHead, PutReady, PutResult, PutSpec};
 use tethera_common::protocol::watch::WatchEvent;
 use tethera_common::structs::agent::AgentProfile;
@@ -11,7 +13,7 @@ use tethera_common::structs::ids::{
     AssetId, ConversationId, PaneId, ProfileId, QuestionId, TabId, WorkspaceId,
 };
 use tethera_common::structs::primitives::{Cursor, Fingerprint};
-use tethera_common::structs::terminal::{Pane, SplitDirection, Tab, Workspace};
+use tethera_common::structs::terminal::{Pane, SplitDirection, Tab, TabLayout, Workspace};
 use tethera_common::structs::transcript::{Answer, Turn};
 use tokio::sync::broadcast;
 
@@ -22,6 +24,15 @@ pub struct TreeSnapshot {
     pub tabs: Vec<Tab>,
     pub panes: Vec<Pane>,
     pub conversations: Vec<Conversation>,
+    /// One per tab whose geometry the backend would vouch for. A tab that is
+    /// absent has none, and the client draws no map for it.
+    pub layouts: Vec<TabLayout>,
+}
+
+impl TreeSnapshot {
+    pub fn layout_of(&self, tab: &TabId) -> Option<&TabLayout> {
+        self.layouts.iter().find(|layout| &layout.tab == tab)
+    }
 }
 
 /// What an enrolment attempt was told about the machine.
@@ -199,6 +210,18 @@ pub trait TerminalPort: Send + Sync {
         tab: &TabId,
     ) -> impl std::future::Future<Output = Result<Vec<Pane>, WireError>> + Send;
 
+    /// Where this tab's panes sit, in cells.
+    fn layout(
+        &self,
+        tab: &TabId,
+    ) -> impl std::future::Future<Output = Result<TabLayout, WireError>> + Send;
+
+    /// Move the machine's own focus to this tab.
+    fn focus_tab(
+        &self,
+        tab: &TabId,
+    ) -> impl std::future::Future<Output = Result<(), WireError>> + Send;
+
     /// Creates a new tab. Geometry is decided here and is stable for the pane's
     /// life; there is no resize in this protocol.
     fn open(
@@ -218,9 +241,14 @@ pub trait TerminalPort: Send + Sync {
         pane: &PaneId,
     ) -> impl std::future::Future<Output = Result<(), WireError>> + Send;
 
+    /// Takes the whole spec rather than a pane id.
+    ///
+    /// The view and the viewport decide what the backend is asked for and how
+    /// its output is laid out, and both are known only to the client that is
+    /// about to draw it.
     fn attach(
         &self,
-        pane: &PaneId,
+        spec: &AttachSpec,
     ) -> impl std::future::Future<Output = Result<Self::Session, WireError>> + Send;
 
     fn scrollback(

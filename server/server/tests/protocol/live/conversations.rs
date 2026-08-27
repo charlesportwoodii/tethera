@@ -4,8 +4,8 @@ use tethera_common::protocol::capability;
 use tethera_common::protocol::error::{EntityKind, WireError};
 use tethera_common::structs::agent::{Agent, AgentStatus, ClaudeAgent};
 use tethera_common::structs::conversation::ConversationFilter;
-use tethera_common::structs::ids::{ConversationId, ProfileId};
-use tethera_common::structs::terminal::Size;
+use tethera_common::structs::ids::{ConversationId, PaneId, ProfileId, TabId, WorkspaceId};
+use tethera_common::structs::terminal::{Pane, Size};
 use tethera_server_lib::backend::TerminalBackend;
 use tethera_server_lib::protocol::live::{LiveConversations, LiveTerminals};
 use tethera_server_lib::protocol::ports::ConversationPort;
@@ -580,4 +580,54 @@ async fn no_directory_is_suggested_when_none_was_asked_for() {
     machine.record("aaaa", &worked_in.path().to_string_lossy());
 
     assert!(machine.conversations().recent_cwds(0).await.is_empty());
+}
+
+/// A conversation running in a pane carries that pane's workspace.
+///
+/// This is what the terminal side of a session is reached by: the client offers
+/// the `Chat | Terminal` toggle only when it knows which workspace to open, so a
+/// bound conversation arriving without one hides a terminal that exists. It read
+/// as "this session has no terminal" for every session on the machine.
+///
+/// The absent case is the one that has to stay absent. An unbound conversation
+/// genuinely has no pane and therefore no workspace, and guessing one — from the
+/// working directory, say — would open somebody onto a different workspace's
+/// panes, which is worse than offering nothing.
+#[test]
+fn a_bound_conversation_carries_the_workspace_of_its_pane() {
+    let workspace = WorkspaceId::mint("w1");
+    let tab = TabId::mint("t1");
+
+    let mut running = Pane::new(
+        PaneId::mint("p1"),
+        tab.clone(),
+        workspace.clone(),
+        "claude".to_string(),
+        Size { cols: 80, rows: 24 },
+    );
+    running.conversation = Some(ConversationId::parse("cv_abc").expect("an id"));
+
+    // An agent nobody can name, which is a real state: a pane runs a harness
+    // that never announced its session.
+    let unnamed = Pane::new(
+        PaneId::mint("p2"),
+        tab,
+        workspace.clone(),
+        "shell".to_string(),
+        Size { cols: 80, rows: 24 },
+    );
+
+    let bound = LiveConversations::bindings_of(vec![running, unnamed]);
+
+    assert_eq!(bound.len(), 1, "only the pane that named a session binds");
+
+    let (pane, held) = bound
+        .get(&ConversationId::parse("cv_abc").expect("an id"))
+        .expect("the running conversation binds");
+
+    assert_eq!(pane.as_str(), "pn_p1");
+    assert_eq!(
+        held, &workspace,
+        "the workspace travels with the pane; read apart they come to disagree"
+    );
 }

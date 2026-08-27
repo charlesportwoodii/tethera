@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use tethera_common::protocol::error::{EntityKind, WireError};
 use tethera_common::protocol::terminal::{CloseReason, RowUpdate, TerminalFrame};
+use tethera_common::protocol::view::PaneView;
 use tethera_common::structs::ids::PaneId;
+use tethera_common::structs::terminal::Size;
 use tokio::sync::{mpsc, watch};
 
 use crate::protocol::live::PaneSession;
@@ -62,6 +64,17 @@ impl PaneEmulator {
 
     pub fn subscribe(&self) -> watch::Receiver<u64> {
         self.revision.subscribe()
+    }
+
+    /// How many sessions are attached to this pane right now.
+    ///
+    /// A `PaneSession` holds a revision receiver for its whole life and drops it
+    /// when the attach ends, so the receiver count *is* the number of readers.
+    /// Counted rather than tracked separately, because a second tally would be a
+    /// second thing to get wrong on a path where being wrong means a read loop
+    /// that never stops.
+    pub fn watchers(&self) -> usize {
+        self.revision.receiver_count()
     }
 
     pub fn input(&self) -> mpsc::Sender<Vec<u8>> {
@@ -147,12 +160,20 @@ pub struct PaneRegistry {
     /// Behind an `Arc` so a pump can hold a `Weak` to it and drop its own entry
     /// when its pane dies, without keeping the registry alive.
     live: Live,
+    /// What each pulled feed was started with, for the backends that pull.
+    ///
+    /// Kept beside the emulators rather than inside them because it describes
+    /// the *source* rather than the pane: a pty pushes its own bytes and never
+    /// records anything here. It exists so a re-attach asking for a different
+    /// view is answered by a new feed instead of being silently ignored.
+    feeds: Mutex<HashMap<PaneId, (PaneView, Size)>>,
 }
 
 impl PaneRegistry {
     pub fn new() -> Self {
         Self {
             live: Arc::new(Mutex::new(HashMap::new())),
+            feeds: Mutex::new(HashMap::new()),
         }
     }
 
@@ -195,6 +216,34 @@ impl PaneRegistry {
         self.live().contains_key(pane)
     }
 
+    /// Records what a pulled feed for this pane was started with.
+    pub fn record_feed(&self, pane: &PaneId, view: PaneView, size: Size) {
+        self.feeds()
+            .insert(pane.clone(), (view, size));
+    }
+
+    /// Whether the feed already running for this pane is the one being asked
+    /// for.
+    ///
+    /// `false` for a pane with no recorded feed, so a backend that pushes its
+    /// own bytes is never mistaken for one that agrees.
+    pub fn feed_matches(&self, pane: &PaneId, view: PaneView, size: Size) -> bool {
+        self.feeds()
+            .get(pane)
+            .is_some_and(|held| *held == (view, size))
+    }
+
+    fn feeds(&self) -> MutexGuard<'_, HashMap<PaneId, (PaneView, Size)>> {
+        self.feeds
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// How many sessions are attached to a pane. `None` if it is not emulated.
+    pub fn watchers(&self, pane: &PaneId) -> Option<usize> {
+        self.live().get(pane).map(|shared| shared.watchers())
+    }
+
     pub fn attach(&self, pane: &PaneId) -> Result<PaneSession, WireError> {
         Ok(PaneSession::new(self.entry(pane)?))
     }
@@ -224,6 +273,7 @@ impl PaneRegistry {
     /// frame, and the pump's later removal is a no-op because it checks identity.
     pub fn forget(&self, pane: &PaneId) {
         self.live().remove(pane);
+        self.feeds().remove(pane);
     }
 
     /// One page of a pane's own history, with the styles it was drawn in.

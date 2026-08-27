@@ -1,5 +1,7 @@
-use tethera_common::structs::ids::QuestionId;
+use tethera_common::structs::agent::{Agent, ScreenChrome};
 use tethera_common::structs::transcript::{Ask, Question, QuestionOption};
+use tethera_common::structs::ids::QuestionId;
+use tethera_common::traits::AgentTrait;
 
 /// A question an agent has on screen and nowhere else.
 ///
@@ -17,14 +19,20 @@ use tethera_common::structs::transcript::{Ask, Question, QuestionOption};
 /// nothing. A false negative leaves a person answering at the machine, which is
 /// where they were already; a false positive puts a question on somebody's phone
 /// that their keystrokes cannot answer, and an `Unblocked` that never comes.
-pub struct PromptDetector;
+pub struct PromptDetector {
+    chrome: &'static ScreenChrome,
+}
 
 impl PromptDetector {
-    /// The cursor an agent draws against the row it is on.
-    const CURSOR: char = '❯';
-
-    /// A rule of the box the harness draws, never content.
-    const RULE: char = '─';
+    /// A detector for a harness somebody has measured.
+    ///
+    /// `None` for one nobody has, and that is the whole answer rather than a
+    /// gap to fill in later: every value below describes what one harness draws,
+    /// and guessing that a second draws the same would put a question on
+    /// somebody's phone that their keystrokes cannot answer.
+    pub fn for_agent(agent: Agent) -> Option<Self> {
+        agent.screen_chrome().map(|chrome| Self { chrome })
+    }
 
     /// Rows this detector will consider. A picker deeper than this is one it
     /// does not recognise, and guessing at it would answer the wrong row.
@@ -39,14 +47,14 @@ impl PromptDetector {
     const PROMPT_WITHIN: usize = 3;
 
     /// What the agent is asking, if it is asking anything.
-    pub fn detect(screen: &str) -> Option<Question> {
+    pub fn detect(&self, screen: &str) -> Option<Question> {
         let lines: Vec<&str> = screen.lines().collect();
-        let (first_row, mut options, closed_by_rule) = Self::options(&lines)?;
+        let (first_row, mut options, closed_by_rule) = self.options(&lines)?;
 
         // The side-by-side picker has no free-text row to lift, so lifting one
         // there removes a real option and offers a field the screen does not
         // have. Measured against both layouts on a live agent.
-        let allows_free_text = !Self::is_side_by_side(screen)
+        let allows_free_text = !self.is_side_by_side(screen)
             && Self::lift_free_text(&mut options, closed_by_rule);
 
         // A row closed by a blank line carries an empty description as a marker.
@@ -61,7 +69,7 @@ impl PromptDetector {
             return None;
         }
 
-        let prompt = Self::prompt_above(&lines, first_row)?;
+        let prompt = self.prompt_above(&lines, first_row)?;
         let asks = vec![Ask {
             header: None,
             prompt,
@@ -94,8 +102,9 @@ impl PromptDetector {
     /// Numbered from one and consecutive. A list that starts at two, or skips a
     /// number, is not a picker this can drive: the number pressed is the row
     /// selected, so a gap would select the wrong one.
-    fn options(lines: &[&str]) -> Option<(usize, Vec<QuestionOption>, bool)> {
+    fn options(&self, lines: &[&str]) -> Option<(usize, Vec<QuestionOption>, bool)> {
         let mut first_row = None;
+        let mut last_row = 0;
         let mut options: Vec<QuestionOption> = Vec::new();
         let mut closed_by_rule = false;
 
@@ -104,13 +113,13 @@ impl PromptDetector {
             // below it is its own chrome — the row a person tapped and got
             // "what would you like to clarify?" was one of those, offered to
             // them as if it were an answer.
-            if first_row.is_some() && Self::is_furniture(line) {
+            if first_row.is_some() && self.is_furniture(line) {
                 closed_by_rule = true;
 
                 break;
             }
 
-            let Some((number, label)) = Self::numbered(line) else {
+            let Some((number, label)) = self.numbered(line) else {
                 // An indented line directly under a row is that row's
                 // description, wrapped. A line after a blank one is not: the
                 // blank ended the row, and what follows is the footer.
@@ -138,13 +147,20 @@ impl PromptDetector {
             }
 
             first_row.get_or_insert(index);
+            last_row = index;
             options.push(QuestionOption {
                 label,
                 description: None,
             });
         }
 
-        first_row.map(|at| (at, options, closed_by_rule))
+        let at = first_row?;
+
+        if self.composer_below(lines, last_row) {
+            return None;
+        }
+
+        Some((at, options, closed_by_rule))
     }
 
     /// Whether this is the picker that draws a preview beside its options.
@@ -158,12 +174,9 @@ impl PromptDetector {
     /// Recognised by the notes affordance, which belongs to the preview pane and
     /// appears nowhere else. The numbering, the rule and the row shapes are all
     /// identical between the two layouts, so none of them can tell them apart.
-    fn is_side_by_side(screen: &str) -> bool {
-        screen.contains(Self::NOTES_HINT)
+    fn is_side_by_side(&self, screen: &str) -> bool {
+        screen.contains(self.chrome.preview_hint)
     }
-
-    /// Printed twice on the side-by-side picker and never on the plain one.
-    const NOTES_HINT: &'static str = "to add notes";
 
     /// Takes the free-text row out of the options, saying so instead.
     ///
@@ -231,19 +244,19 @@ impl PromptDetector {
     }
 
     /// The question, taken from just above the rows.
-    fn prompt_above(lines: &[&str], first_row: usize) -> Option<String> {
+    fn prompt_above(&self, lines: &[&str], first_row: usize) -> Option<String> {
         lines[..first_row]
             .iter()
             .rev()
             .take(Self::PROMPT_WITHIN)
             .map(|line| line.trim())
-            .find(|line| !line.is_empty() && !Self::is_furniture(line))
+            .find(|line| !line.is_empty() && !self.is_furniture(line))
             .map(str::to_string)
     }
 
     /// `❯ 1. Yes` and `  2. No` both, with the number and the label.
-    fn numbered(line: &str) -> Option<(usize, String)> {
-        let text = line.trim_start().trim_start_matches(Self::CURSOR).trim_start();
+    fn numbered(&self, line: &str) -> Option<(usize, String)> {
+        let text = line.trim_start().trim_start_matches(self.chrome.cursor).trim_start();
         let (digits, rest) = text.split_at(text.find('.')?);
         let number: usize = digits.parse().ok()?;
 
@@ -286,9 +299,35 @@ impl PromptDetector {
     }
 
     /// A rule, or a line that is only the harness's own box drawing.
-    fn is_furniture(line: &str) -> bool {
+    fn is_furniture(&self, line: &str) -> bool {
         let text = line.trim();
 
-        !text.is_empty() && text.chars().all(|c| c == Self::RULE)
+        !text.is_empty() && text.chars().all(|c| c == self.chrome.rule)
+    }
+
+    /// Whether the harness is drawing its input line *below* these rows.
+    ///
+    /// **While an agent is asking, its composer is not on the screen** — the
+    /// picker takes the bottom of the screen and gives it back only once the
+    /// question is answered. Measured on a live pane: the same agent idle draws
+    /// a rule, an input line and a status bar; holding a picker draws neither
+    /// rule nor input line, ending instead on the rows and their hint.
+    ///
+    /// So a cursor below the last row means the rows are scrollback and
+    /// something else owns the bottom. An operator sent a numbered list as an
+    /// ordinary message, the harness echoed it behind the same cursor glyph a
+    /// picker marks its current row with, and it was published to their phone
+    /// as a question — with the line above it as the prompt, and no keystroke
+    /// that could answer it. It also never cleared, because scrollback does not
+    /// move.
+    ///
+    /// Scanned from below the *last* row rather than the first, because the
+    /// cursor sits on whichever row the person has navigated to, and that row
+    /// is one of these.
+    fn composer_below(&self, lines: &[&str], last_row: usize) -> bool {
+        lines
+            .iter()
+            .skip(last_row + 1)
+            .any(|line| line.trim_start().starts_with(self.chrome.cursor))
     }
 }

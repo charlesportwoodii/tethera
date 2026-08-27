@@ -73,6 +73,7 @@ fn a_machine_watch_opens_with_the_whole_tree() {
         tabs: Vec::new(),
         panes: Vec::new(),
         conversations: vec![a_conversation()],
+        layouts: Vec::new(),
     };
     let bytes = postcard::to_stdvec(&open).expect("encode");
 

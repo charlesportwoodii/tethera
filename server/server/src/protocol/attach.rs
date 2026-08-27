@@ -15,7 +15,7 @@ impl Attach {
         mut send: iroh::endpoint::SendStream,
         mut recv: iroh::endpoint::RecvStream,
     ) -> Result<(), TransportError> {
-        let mut session = match ports.terminals().attach(&spec.pane).await {
+        let mut session = match ports.terminals().attach(&spec).await {
             Ok(session) => session,
             Err(_) => {
                 FrameIo::write(

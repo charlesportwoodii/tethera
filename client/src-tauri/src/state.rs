@@ -8,6 +8,8 @@ use tethera_common::protocol::handshake::{ClientInfo, Platform, ServerHello};
 use tethera_common::structs::client::ServerEntry;
 use tethera_common::structs::ids::ServerId;
 use crate::downloads::Downloads;
+use crate::panes::PaneAttachments;
+use crate::machine_watch::MachineWatch;
 use crate::watches::ConversationWatches;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
@@ -25,6 +27,8 @@ pub struct AppState {
     // observes.
     pairing: Mutex<Option<PairingSession>>,
     watches: ConversationWatches,
+    machine: MachineWatch,
+    panes: PaneAttachments,
     // One live connection per machine, keyed by its id.
     //
     // A connection carries the completed handshake, and every request on it is
@@ -55,6 +59,8 @@ impl AppState {
             client,
             pairing: Mutex::new(None),
             watches: ConversationWatches::new(),
+            machine: MachineWatch::new(),
+            panes: PaneAttachments::new(),
             live: Mutex::new(HashMap::new()),
             settings,
             downloads,
@@ -87,6 +93,14 @@ impl AppState {
 
     pub fn watches(&self) -> &ConversationWatches {
         &self.watches
+    }
+
+    pub fn machine_watch(&self) -> &MachineWatch {
+        &self.machine
+    }
+
+    pub fn panes(&self) -> &PaneAttachments {
+        &self.panes
     }
 
     pub fn downloads(&self) -> &Downloads {

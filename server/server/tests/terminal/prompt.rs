@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use tethera_common::structs::agent::Agent;
 use tethera_server_lib::terminal::PromptDetector;
 
 /// A screen captured off a live agent, not written from memory.
@@ -16,13 +17,22 @@ fn screen(name: &str) -> String {
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
+/// Built the way the server builds one: off the harness's own table.
+///
+/// Not a constant reached for directly — that is the point of the change this
+/// pins. A harness nobody has measured has no table and gets no detector, so
+/// its screens are never read with another harness's glyphs.
+fn detector() -> PromptDetector {
+    PromptDetector::for_agent(Agent::Claude).expect("this harness has been measured")
+}
+
 // The prompt that matters most in the product: it happens an order of magnitude
 // more often than an agent-initiated question, and it is never written to the
 // records, so reading the screen is the only way to know a person is being
 // asked at all.
 #[test]
 fn a_permission_prompt_is_read_off_the_screen() {
-    let question = PromptDetector::detect(&screen("permission-write.txt"))
+    let question = detector().detect(&screen("permission-write.txt"))
         .expect("the agent is asking to create a file");
 
     let ask = &question.asks[0];
@@ -42,7 +52,7 @@ fn a_permission_prompt_is_read_off_the_screen() {
 // path drives both.
 #[test]
 fn an_agent_question_picker_is_read_by_the_same_detector() {
-    let question = PromptDetector::detect(&screen("ask-user-question.txt"))
+    let question = detector().detect(&screen("ask-user-question.txt"))
         .expect("the agent is asking which route owns pair");
 
     let ask = &question.asks[0];
@@ -62,7 +72,7 @@ fn an_agent_question_picker_is_read_by_the_same_detector() {
 #[test]
 fn the_rows_are_numbered_from_one_and_consecutive() {
     for name in ["permission-write.txt", "ask-user-question.txt"] {
-        let question = PromptDetector::detect(&screen(name)).expect(name);
+        let question = detector().detect(&screen(name)).expect(name);
 
         assert!(
             !question.asks[0].options.is_empty(),
@@ -77,7 +87,7 @@ fn the_rows_are_numbered_from_one_and_consecutive() {
 // instead of an answer to it.
 #[test]
 fn the_harness_chrome_below_the_rule_is_not_an_answer() {
-    let question = PromptDetector::detect(&screen("ask-user-question.txt"))
+    let question = detector().detect(&screen("ask-user-question.txt"))
         .expect("the agent is asking which route owns pair");
 
     let labels: Vec<&str> = question.asks[0]
@@ -98,7 +108,7 @@ fn the_harness_chrome_below_the_rule_is_not_an_answer() {
 #[test]
 fn the_keyboard_hint_is_not_read_as_an_options_description() {
     for name in ["ask-user-question.txt", "permission-write.txt"] {
-        let question = PromptDetector::detect(&screen(name)).expect(name);
+        let question = detector().detect(&screen(name)).expect(name);
 
         for option in &question.asks[0].options {
             let said = option.description.as_deref().unwrap_or_default();
@@ -126,7 +136,7 @@ fn the_keyboard_hint_is_not_read_as_an_options_description() {
 // get out.
 #[test]
 fn the_free_text_row_is_a_capability_rather_than_an_option() {
-    let question = PromptDetector::detect(&screen("ask-user-question.txt"))
+    let question = detector().detect(&screen("ask-user-question.txt"))
         .expect("the agent is asking which route owns pair");
 
     let ask = &question.asks[0];
@@ -145,7 +155,7 @@ fn the_free_text_row_is_a_capability_rather_than_an_option() {
 // that could only ever say yes would be worse than one that could not answer.
 #[test]
 fn a_permission_prompt_keeps_every_row_including_the_refusal() {
-    let question = PromptDetector::detect(&screen("permission-write.txt"))
+    let question = detector().detect(&screen("permission-write.txt"))
         .expect("the agent is asking to create a file");
 
     let ask = &question.asks[0];
@@ -173,8 +183,8 @@ fn typing_into_the_free_text_row_does_not_change_the_question() {
 
     assert_ne!(blank, typed, "the fixture no longer has the row this pins");
 
-    let before = PromptDetector::detect(&blank).expect("a question");
-    let after = PromptDetector::detect(&typed).expect("the same question");
+    let before = detector().detect(&blank).expect("a question");
+    let after = detector().detect(&typed).expect("the same question");
 
     assert_eq!(
         before.fingerprint, after.fingerprint,
@@ -199,7 +209,7 @@ fn a_screen_with_no_question_on_it_is_not_one() {
         // The prose case is the one worth being explicit about: it has rows
         // numbered from one, so only the absence of a question line above them
         // keeps it out.
-        let found = PromptDetector::detect(not_a_prompt);
+        let found = detector().detect(not_a_prompt);
 
         assert!(
             found.is_none() || found.as_ref().is_some_and(|q| !q.asks[0].prompt.is_empty()),
@@ -213,13 +223,13 @@ fn a_screen_with_no_question_on_it_is_not_one() {
 // an answer would land on whatever replaced it.
 #[test]
 fn the_same_prompt_detects_as_the_same_question_twice() {
-    let once = PromptDetector::detect(&screen("permission-write.txt")).expect("a question");
-    let again = PromptDetector::detect(&screen("permission-write.txt")).expect("a question");
+    let once = detector().detect(&screen("permission-write.txt")).expect("a question");
+    let again = detector().detect(&screen("permission-write.txt")).expect("a question");
 
     assert_eq!(once.id, again.id);
     assert_eq!(once.fingerprint, again.fingerprint);
 
-    let other = PromptDetector::detect(&screen("ask-user-question.txt")).expect("a question");
+    let other = detector().detect(&screen("ask-user-question.txt")).expect("a question");
 
     assert_ne!(once.id, other.id);
     assert_ne!(once.fingerprint, other.fingerprint);
@@ -231,7 +241,7 @@ fn the_same_prompt_detects_as_the_same_question_twice() {
 // with different rules, captured off a live agent rather than written here.
 #[test]
 fn the_side_by_side_picker_is_read_as_a_question() {
-    let question = PromptDetector::detect(&screen("side-by-side.txt"))
+    let question = detector().detect(&screen("side-by-side.txt"))
         .expect("a side-by-side picker is still a question");
 
     let ask = &question.asks[0];
@@ -247,7 +257,7 @@ fn the_side_by_side_picker_is_read_as_a_question() {
 // offering a field the screen does not have.
 #[test]
 fn the_side_by_side_picker_has_no_free_text_row_to_lift() {
-    let question = PromptDetector::detect(&screen("side-by-side.txt")).expect("a question");
+    let question = detector().detect(&screen("side-by-side.txt")).expect("a question");
     let ask = &question.asks[0];
 
     assert_eq!(ask.options.len(), 3, "a real option was taken for an affordance");
@@ -262,7 +272,38 @@ fn the_side_by_side_picker_has_no_free_text_row_to_lift() {
 // row, because there it really is one.
 #[test]
 fn the_plain_picker_still_lifts_its_free_text_row() {
-    let question = PromptDetector::detect(&screen("ask-user-question.txt")).expect("a question");
+    let question = detector().detect(&screen("ask-user-question.txt")).expect("a question");
 
     assert!(question.asks[0].allows_free_text);
+}
+
+// The other half of the rule above, and the reason it is safe: a picker in a
+// pane tall enough to have shown a composer a moment earlier. The same agent
+// idle draws a rule, an input line and a status bar; holding this question it
+// draws none of them. That is what makes a cursor below the rows evidence the
+// rows are scrollback — so this screen must still be read as a question.
+#[test]
+fn a_picker_holding_a_full_height_pane_is_still_a_question() {
+    let question =
+        detector().detect(&screen("picker-full-height.txt")).expect("the agent is asking");
+    let ask = &question.asks[0];
+
+    assert_eq!(ask.prompt, "Which route owns pair?");
+    assert_eq!(ask.options[0].label, "Rewrite");
+    assert_eq!(ask.options[1].label, "Register");
+}
+
+// **A person typing a numbered list is not a picker.** An operator sent
+// `1. This / 2. That / 3. foo` as an ordinary message; the harness echoed it
+// into the transcript behind `❯`, which is the same glyph a picker marks its
+// current row with, and a question appeared on their phone with the spinner
+// line as its prompt. Nothing on that screen could be answered.
+//
+// The captured screen is this session's own pane at the moment it happened.
+#[test]
+fn a_numbered_list_in_a_message_is_not_a_question() {
+    assert!(
+        detector().detect(&screen("echoed-list.txt")).is_none(),
+        "an echoed message was offered as a question a keystroke cannot answer"
+    );
 }

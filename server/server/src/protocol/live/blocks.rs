@@ -255,9 +255,15 @@ impl BlockWatch {
         // whole signature exists for: the subprocess sits behind an admission
         // gate shared with every other terminal call, and losing that race is
         // ordinary rather than exceptional.
+        // A harness nobody has measured has no chrome to read, so nothing is
+        // reported as pending rather than a guess being published to a phone.
+        let Some(detector) = PromptDetector::for_agent(self.agent) else {
+            return Ok(None);
+        };
+
         let screen = self.terminals.screen(&pane).await?;
 
-        Ok(PromptDetector::detect(&screen))
+        Ok(detector.detect(&screen))
     }
 
     /// Publishes the transitions of one conversation until nobody is listening.
