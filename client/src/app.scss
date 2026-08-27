@@ -10,6 +10,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+// The barcode scanner draws its camera preview *behind* the webview rather than
+// into it, so the page has to get out of the way for the duration of a scan.
+// Without this the camera is running and the screen shows the app: the symptom
+// is a device that feels like it is scanning and displays nothing.
+html.scanning,
+html.scanning body {
+  background: transparent;
+}
+
 * {
   box-sizing: border-box;
 }

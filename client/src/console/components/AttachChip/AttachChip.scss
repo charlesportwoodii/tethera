@@ -1,0 +1,60 @@
+.tc-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--tc-r-control);
+  background: var(--tc-surface-2);
+  font-size: 12px;
+  color: var(--tc-ink-2);
+  max-width: 100%;
+
+  &__ext {
+    font-family: var(--tc-mono);
+    font-size: 8.5px;
+    letter-spacing: 0.08em;
+    color: var(--tc-ink-3);
+    background: var(--tc-surface-3);
+    border-radius: 4px;
+    padding: 2px 5px;
+    flex: none;
+  }
+
+  &__name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  &__track {
+    width: 52px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--tc-surface-3);
+    overflow: hidden;
+    flex: none;
+  }
+
+  &__fill {
+    display: block;
+    height: 100%;
+    background: var(--tc-accent);
+  }
+
+  &__remove {
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 0;
+    background: none;
+    color: var(--tc-ink-3);
+    padding: 0;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+  }
+}

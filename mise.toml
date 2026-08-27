@@ -42,9 +42,32 @@ description = "Apply pending migrations to the database at DATABASE_URL"
 dir = "{{config_root}}"
 run = "cargo run -p tethera-migration -- up"
 
+[tasks.test-protocol]
+description = "The protocol end-to-end suite over a real iroh loopback pair"
+dir = "{{config_root}}/server/server"
+run = "cargo test -j4 --test integration protocol::"
+
+[tasks.bless]
+description = "Rewrite the golden wire fixtures. Only after a deliberate wire change with a version bump."
+dir = "{{config_root}}"
+# An env table rather than a shell prefix: mise runs task bodies through cmd on
+# Windows, so `VAR=x cmd` and `$env:VAR = 'x'; cmd` both fail there.
+env = { TETHERA_BLESS = "1" }
+run = "cargo test -p tethera-common"
+
+[tasks.check-client-core]
+description = "cargo check -p tethera-client-core"
+dir = "{{config_root}}"
+run = "cargo check -p tethera-client-core"
+
+[tasks.test-client-core]
+description = "cargo test -p tethera-client-core"
+dir = "{{config_root}}"
+run = "cargo test -p tethera-client-core"
+
 [tasks.test-all]
 description = "Every test task"
-depends = ["test-common", "test-transport", "test-server", "test-relay"]
+depends = ["test-common", "test-transport", "test-server", "test-relay", "test-client-core"]
 
 [tasks.build-server]
 description = "cargo build in server/server"
@@ -107,3 +130,184 @@ depends = ["deps", "frontend"]
 description = "Name what is missing before a build turns it into an obscure error"
 dir = "{{config_root}}"
 run = "node scripts/preflight.mjs"
+
+[tasks.build-android]
+description = "Build the Android debug APK. Pass --deploy to install it on the connected device, launch it, and tail its logs."
+dir = "{{config_root}}/client"
+depends = ["bindings", "deps"]
+# This body is PowerShell, not a single command. mise defaults to `cmd` on
+# Windows and the `bash` on PATH is WSL's, which cannot see the Windows
+# toolchain -- naming the shell here is what makes a multi-line body safe.
+shell = "pwsh -NoLogo -Command"
+# Declaring the flag keeps it off the build command line. With no usage spec
+# mise appends every trailing argument to the run script, so
+# `mise run build-android --deploy` would reach the CLI as
+# `yarn tauri android build --debug --apk --target aarch64 --deploy`.
+usage = '''
+flag "--deploy" help="After the build, install the APK on the connected device, launch it, and stream its logcat until Ctrl+C."
+'''
+run = '''
+$deploy = ($env:usage_deploy -eq 'true' -or $env:usage_deploy -eq '1')
+$package = "com.alaydriem.tethera"
+
+# NDK_HOME is a machine variable and goes stale the moment an NDK is upgraded
+# and the old one removed. The failure is "Android NDK invalid", which names the
+# variable but not the fact that the directory simply is not there. Validate it,
+# and fall back to the highest installed NDK rather than failing on a path
+# nothing has pointed at for months.
+function Resolve-Ndk {
+  if ($env:NDK_HOME -and (Test-Path (Join-Path $env:NDK_HOME "source.properties"))) {
+    return $env:NDK_HOME
+  }
+
+  $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
+  $root = Join-Path $sdk "ndk"
+
+  if (-not (Test-Path $root)) { return $null }
+
+  $best = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path (Join-Path $_.FullName "source.properties") } |
+    Sort-Object { [version]($_.Name -replace '^(\d+\.\d+\.\d+).*$', '$1') } -Descending |
+    Select-Object -First 1
+
+  if ($best) { return $best.FullName }
+
+  return $null
+}
+
+$ndk = Resolve-Ndk
+
+if (-not $ndk) {
+  Write-Host "FAIL  no Android NDK found. Install one through the SDK manager, then set NDK_HOME."
+  exit 1
+}
+
+if ($env:NDK_HOME -ne $ndk) {
+  Write-Host "note  NDK_HOME was '$($env:NDK_HOME)', which is not an installed NDK."
+  Write-Host "      using $ndk for this build. Set NDK_HOME to it to silence this."
+  $env:NDK_HOME = $ndk
+}
+
+$buildStart = Get-Date
+
+yarn tauri android build --debug --apk --target aarch64
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Take the newest debug APK gradle wrote rather than composing a path. Under
+# --target aarch64 the artifact lands in the "universal" flavour directory, not
+# "arm64", and the arm64 directory keeps whatever was last built there -- which
+# installs and launches without complaint. A composed path deploys that stale
+# copy, and the install, the launch and the log tail all still succeed.
+$outputs = Join-Path (Resolve-Path $env:MISE_PROJECT_ROOT) "client\src-tauri\gen\android\app\build\outputs\apk"
+$apk = (Get-ChildItem -Path $outputs -Recurse -Filter "*-debug.apk" -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+
+if (-not $apk) {
+  Write-Host ""
+  Write-Host "FAIL  the build reported success but no debug APK is anywhere under"
+  Write-Host "      $outputs"
+  exit 1
+}
+
+if ($apk.LastWriteTime -lt $buildStart) {
+  Write-Host ""
+  Write-Host "note  gradle repackaged nothing; $($apk.Name) is from an earlier run."
+}
+
+$apk = $apk.FullName
+
+if (-not $deploy) {
+  Write-Host ""
+  Write-Host "ok    APK  $apk"
+  exit 0
+}
+
+if (-not (Get-Command adb -ErrorAction SilentlyContinue)) {
+  Write-Host ""
+  Write-Host "FAIL  adb is not on PATH. Install the Android SDK platform-tools and add it."
+  Write-Host "      The build succeeded; the APK is at:"
+  Write-Host "      $apk"
+  exit 1
+}
+
+# adb itself honours ANDROID_SERIAL, so an explicit --serial flag would only
+# duplicate it. The device check exists to name "no device" and "which device"
+# rather than let adb fail with its own one-line message.
+if (-not $env:ANDROID_SERIAL) {
+  $devices = @()
+  foreach ($line in (adb devices)) {
+    if ($line -match '^(\S+)\s+device$') { $devices += $matches[1] }
+  }
+
+  if ($devices.Count -eq 0) {
+    Write-Host ""
+    Write-Host "FAIL  no device is attached and authorised. Check the cable, then run 'adb devices'."
+    Write-Host "      An 'unauthorized' entry there means the USB debugging prompt on the"
+    Write-Host "      phone has not been accepted yet."
+    exit 1
+  }
+
+  if ($devices.Count -gt 1) {
+    Write-Host ""
+    Write-Host "FAIL  more than one device is attached. Set ANDROID_SERIAL to pick one:"
+    foreach ($d in $devices) { Write-Host "        $d" }
+    exit 1
+  }
+
+  Write-Host ""
+  Write-Host "ok    device  $($devices[0])"
+} else {
+  Write-Host ""
+  Write-Host "ok    device  $env:ANDROID_SERIAL (from ANDROID_SERIAL)"
+}
+
+Write-Host "      installing $apk"
+$install = adb install -r $apk 2>&1
+Write-Host ($install -join "`n")
+if ($LASTEXITCODE -ne 0 -or ($install -join "`n") -match 'INSTALL_FAILED') {
+  Write-Host ""
+  Write-Host "FAIL  the install did not complete."
+  if (($install -join "`n") -match 'SIGNATURES|UPDATE_INCOMPATIBLE') {
+    Write-Host "      The signature does not match the copy already on the device, which a"
+    Write-Host "      release build or another machine's debug key both cause. Remove it:"
+    Write-Host "        adb uninstall $package"
+  }
+  exit 1
+}
+
+# Clear first, start second, attach third. logcat reads the buffer from the
+# start rather than the tail, so the lines emitted between `am start` and the
+# attach below are still in it -- the clear is what keeps the earlier run's
+# output from being replayed with them.
+adb logcat -c 2>&1 | Out-Null
+
+$started = adb shell am start -n "$package/.MainActivity" 2>&1
+Write-Host ($started -join "`n")
+if (($started -join "`n") -match 'Error|Exception') {
+  Write-Host ""
+  Write-Host "FAIL  the activity did not start. The APK installed, so launch it from the"
+  Write-Host "      launcher and read the message above."
+  exit 1
+}
+
+$pid_ = $null
+foreach ($attempt in 1..40) {
+  $found = "$(adb shell pidof -s $package 2>&1)".Trim()
+  if ($found -match '^\d+$') { $pid_ = $found; break }
+  Start-Sleep -Milliseconds 250
+}
+
+if (-not $pid_) {
+  Write-Host ""
+  Write-Host "FAIL  the app started but no process survived to be tailed, which is a crash"
+  Write-Host "      during startup. The last of the log follows."
+  adb logcat -d -t 200
+  exit 1
+}
+
+# --pid rather than a tag filter: one filter then covers the Rust log crate, the
+# webview console and the Kotlin side, none of whose tags are stable.
+Write-Host "ok    pid $pid_ -- tailing logcat, Ctrl+C to stop"
+Write-Host ""
+adb logcat --pid=$pid_
+'''

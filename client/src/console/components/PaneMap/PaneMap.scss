@@ -1,0 +1,70 @@
+.tc-panemap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px 8px;
+  flex: none;
+
+  &__grid {
+    position: relative;
+    width: 54px;
+    height: 34px;
+    flex: none;
+    border-radius: 3px;
+    background: var(--tc-term-chrome);
+    overflow: hidden;
+  }
+
+  // Positioned from the fractions the caller supplies, so the diagram is the
+  // desk's layout rather than a guess at it.
+  &__cell {
+    position: absolute;
+    border: 0;
+    padding: 0;
+    background: var(--tc-term-bg);
+    box-shadow: inset 0 0 0 1px var(--tc-term-chrome);
+    cursor: pointer;
+
+    &.is-active {
+      background: var(--tc-accent);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-term-fg);
+      outline-offset: -2px;
+    }
+  }
+
+  &__label {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    color: var(--tc-term-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__split {
+    display: flex;
+    gap: 5px;
+    flex: none;
+  }
+
+  &__button {
+    border: 0;
+    border-radius: var(--tc-r-chip);
+    background: var(--tc-term-chrome);
+    color: var(--tc-term-fg);
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    padding: 6px 9px;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-term-fg);
+      outline-offset: 2px;
+    }
+  }
+}

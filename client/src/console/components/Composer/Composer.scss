@@ -1,19 +1,40 @@
 .tc-composer {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 16px 12px;
+
+  &__attached {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  &__row {
+    display: flex;
+    align-items: flex-end;
+    gap: 9px;
+  }
 
   &__attach {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 38px;
+    height: 38px;
     border: 0;
+    border-radius: var(--tc-r-control);
     background: none;
-    color: var(--tc-ink-3);
+    box-shadow: inset 0 0 0 1px var(--tc-rule-2);
+    color: var(--tc-ink-2);
     flex: none;
     cursor: pointer;
+
+    // Lit while anything is attached, so the clip reports as well as invites.
+    &.is-on {
+      background: var(--tc-accent);
+      color: var(--tc-accent-ink);
+      box-shadow: none;
+    }
 
     &:focus-visible {
       outline: 2px solid var(--tc-ink);
@@ -26,11 +47,18 @@
     min-width: 0;
     font-family: var(--tc-mono);
     font-size: 12px;
+    line-height: 1.5;
     color: var(--tc-ink);
     background: var(--tc-surface-2);
     border: 0;
     border-radius: var(--tc-r-control);
     padding: 11px 12px;
+    // The action sizes the height; the field must not be draggable on top of it.
+    resize: none;
+    // A pasted path or a URL with no spaces would otherwise push the composer
+    // sideways again, which is the bug this replaced.
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
 
     &::placeholder {
       color: var(--tc-ink-3);
@@ -55,7 +83,8 @@
     cursor: pointer;
 
     &:disabled {
-      opacity: 0.45;
+      background: var(--tc-surface-3);
+      color: var(--tc-ink-3);
       cursor: not-allowed;
     }
 

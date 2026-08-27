@@ -21,6 +21,12 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["tethera"] },
+      "mobile": [{ "scheme": ["tethera"], "appLink": false }]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

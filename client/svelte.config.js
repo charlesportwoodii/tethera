@@ -14,6 +14,10 @@ const config = {
       // well as for the bundler.
       $console: "src/console",
       $bindings: "src/js/bindings",
+      // Not `$app`: SvelteKit already owns that prefix for `$app/navigation`
+      // and friends, and shadowing it breaks the framework's own imports.
+      $managers: "src/js/app",
+      $components: "src/js/components",
     },
   },
 };

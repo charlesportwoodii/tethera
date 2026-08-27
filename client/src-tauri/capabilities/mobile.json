@@ -1,8 +1,22 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile",
-  "description": "Capabilities the main window holds on Android and iOS only.",
-  "platforms": ["android", "iOS"],
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Capabilities the main window holds on Android and iOS only. The barcode scanner and the biometric sensor exist on no desktop platform, so granting them here keeps a desktop build from referencing permissions it has no plugin for. The biometric permission is the one capability the webview genuinely needs: the lock screen is a screen, so it asks. What it can do with a success is call `unlock`, which is a flag the Rust side owns and every dial consults.",
+  "platforms": [
+    "android",
+    "iOS"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel",
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "barcode-scanner:allow-open-app-settings",
+    "biometric:allow-authenticate",
+    "biometric:allow-status"
+  ]
 }

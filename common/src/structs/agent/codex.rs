@@ -1,6 +1,7 @@
-use super::{AgentCapabilities, AgentSpawn};
-use crate::structs::transcript::TranscriptEntry;
+use super::{AgentCapabilities, AgentProfile, AgentSpawn, NoiseFilter, TranscriptSource};
+use crate::structs::ids::ProfileId;
 use crate::traits::AgentTrait;
+use std::path::Path;
 
 pub struct CodexAgent;
 
@@ -9,7 +10,15 @@ impl CodexAgent {
 }
 
 impl AgentTrait for CodexAgent {
+    fn binary(&self) -> &'static str {
+        Self::BINARY
+    }
+
     fn launch_command(&self, spawn: &AgentSpawn) -> Vec<String> {
+        if let Some(session) = &spawn.resume {
+            return self.resume_command(session);
+        }
+
         let mut argv = vec![Self::BINARY.to_string()];
 
         if let Some(prompt) = &spawn.prompt {
@@ -36,10 +45,41 @@ impl AgentTrait for CodexAgent {
         }
     }
 
-    // The transcript format is owned by the protocol agents. Until they define
-    // it, an unparsed transcript is one Unknown part carrying the source rows,
-    // which is exactly the contract a client already handles.
-    fn parse_transcript(&self, raw: &str) -> Vec<TranscriptEntry> {
-        TranscriptEntry::unparsed(Self::BINARY, raw)
+    fn profile(&self) -> AgentProfile {
+        AgentProfile {
+            id: ProfileId(Self::BINARY.to_string()),
+            label: "Codex".to_string(),
+            description: None,
+            version: None,
+            supports_resume: true,
+            // Nobody has measured Codex's records, so this build cannot read
+            // them. Claiming otherwise would put an empty conversation in front
+            // of a person instead of the terminal that does work.
+            provides_transcript: false,
+        }
+    }
+
+    fn transcript_source(&self, _home: &Path, _cwd: &str, _session: &str) -> TranscriptSource {
+        TranscriptSource::Absent
+    }
+
+    fn noise_filter(&self) -> &'static NoiseFilter {
+        &NoiseFilter::EMPTY
+    }
+
+    fn file_push_tools(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn question_tools(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn diff_tools(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn todo_tools(&self) -> &'static [&'static str] {
+        &[]
     }
 }

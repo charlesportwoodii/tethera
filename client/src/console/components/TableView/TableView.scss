@@ -1,0 +1,46 @@
+.tc-table {
+  border-radius: var(--tc-r-chip);
+  background: var(--tc-surface-2);
+  // Wide content scrolls inside its own box so the transcript never scrolls
+  // sideways.
+  overflow-x: auto;
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12.5px;
+  }
+
+  caption {
+    text-align: left;
+    padding: 7px 10px 0;
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+  }
+
+  th {
+    text-align: left;
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+    font-weight: 500;
+    padding: 8px 10px 4px;
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 5px 10px;
+    color: var(--tc-ink-2);
+    vertical-align: top;
+    font-variant-numeric: tabular-nums;
+  }
+
+  tr:last-child td {
+    padding-bottom: 9px;
+  }
+}

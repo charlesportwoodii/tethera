@@ -1,0 +1,36 @@
+.tc-view {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--tc-r-control);
+  background: var(--tc-surface-2);
+  flex: none;
+
+  &__side {
+    flex: 1;
+    border: 0;
+    background: none;
+    border-radius: var(--tc-r-chip);
+    padding: 8px 12px;
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+
+    &.is-on {
+      background: var(--tc-surface);
+      color: var(--tc-ink);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+  }
+}

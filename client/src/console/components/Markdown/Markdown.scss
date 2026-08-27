@@ -1,0 +1,130 @@
+.tc-md {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--tc-ink-2);
+
+  p {
+    margin: 0;
+  }
+
+  // Headings in a transcript are structure inside one turn, not page furniture,
+  // so they stay close to body size and lean on weight instead.
+  &__h {
+    margin: 2px 0 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--tc-ink);
+  }
+
+  &__h.is-1,
+  &__h.is-2 {
+    font-size: 15px;
+  }
+
+  strong {
+    color: var(--tc-ink);
+    font-weight: 600;
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  del {
+    color: var(--tc-ink-3);
+  }
+
+  &__code {
+    font-family: var(--tc-mono);
+    font-size: 12px;
+    color: var(--tc-accent);
+    // A long path in a code span must not push the turn sideways.
+    overflow-wrap: anywhere;
+  }
+
+  // A horizontal scroller inside a vertical one is unusable with a thumb, so a
+  // fenced block wraps and grows its own vertical scroller instead.
+  &__pre {
+    margin: 0;
+    background: var(--tc-term-bg);
+    border-radius: var(--tc-r-chip);
+    padding: 10px 12px;
+    font-family: var(--tc-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--tc-term-fg);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  &__lang {
+    display: block;
+    font-family: var(--tc-mono);
+    font-size: 8.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--tc-term-dim);
+    margin-bottom: 6px;
+  }
+
+  ul,
+  ol {
+    margin: 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  li {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  &__quote {
+    margin: 0;
+    padding-left: 11px;
+    box-shadow: inset 2px 0 0 var(--tc-rule-2);
+    color: var(--tc-ink-3);
+  }
+
+  &__rule {
+    border: 0;
+    height: 1px;
+    background: var(--tc-rule);
+    margin: 3px 0;
+    width: 100%;
+  }
+
+  // A link is a button, never an anchor: no href attribute exists anywhere in
+  // this component, so there is nothing for a scheme to be smuggled into.
+  &__link {
+    border: 0;
+    padding: 0;
+    background: none;
+    font: inherit;
+    color: var(--tc-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+    text-align: left;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      cursor: default;
+      text-decoration-style: dotted;
+    }
+  }
+}

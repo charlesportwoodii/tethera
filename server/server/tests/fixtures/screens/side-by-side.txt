@@ -1,0 +1,18 @@
+● Now holding a preview-layout question open so they can read the real screen. Don't answer this one from the phone — leave it sitting for a moment while they snapshot the pane, then answer it however you like:
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Unknown picker
+
+│ This one is deliberately side-by-side, so the server agent can read the real picker. Which failure mode should the machine prefer when it meets a question screen it cannot drive?
+
+❯ 1. Refuse and say so            ┌──────────────────────────────────────────┐
+  2. Try, then verify             │ PHONE                                    │
+  3. Drive it blind               ├─── ✂ ─── 8 lines hidden ─────────────────┤
+                                  └──────────────────────────────────────────┘
+
+                                  Notes: press n to add notes
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Esc to cancel

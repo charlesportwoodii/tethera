@@ -1,19 +1,21 @@
-/**
- * The colours a pane line can take. Deliberately a small named set rather than
- * 256 ANSI codes: this component renders what the gateway has already normalised.
- * A real ANSI parser belongs upstream of it, not inside it.
- */
-export type TermTone = "plain" | "dim" | "ok" | "accent" | "warn" | "attn";
-
-export interface TermLine {
-  text: string;
-  tone?: TermTone;
-}
+import type { TerminalGrid } from "$console/lib/terminal";
 
 export interface TerminalViewProps {
-  lines: TermLine[];
-  /** Draw the block cursor after the last line. */
-  cursor?: boolean;
-  /** Reported in the drawer head — "80x24". */
+  /**
+   * The pane's screen.
+   *
+   * The grid is owned by the caller, because damage frames only make sense
+   * against what came before and a component recreated on every prop change
+   * cannot hold that. Pass the same instance and bump `revision` when it changes.
+   */
+  grid: TerminalGrid;
+  /**
+   * Increment after applying frames. The grid mutates in place, so there is
+   * nothing for Svelte to compare — this is the signal to repaint.
+   */
+  revision?: number;
+  /** Reported in the drawer head — "80×24". */
   label?: string;
+  /** Called when the pane is tapped, so a host can raise a keyboard. */
+  onfocus?: (() => void) | null;
 }

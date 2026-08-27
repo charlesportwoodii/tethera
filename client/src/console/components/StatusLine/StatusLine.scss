@@ -1,0 +1,27 @@
+.tc-status {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--tc-r-chip);
+  background: var(--tc-surface-2);
+  min-width: 0;
+
+  &__label {
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+    flex: none;
+  }
+
+  &__detail {
+    font-size: 12.5px;
+    color: var(--tc-ink-2);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

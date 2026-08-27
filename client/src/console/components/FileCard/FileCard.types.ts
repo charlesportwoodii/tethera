@@ -1,7 +1,7 @@
 export interface FileCardProps {
   name: string;
-  /** Bytes. bigint because that is what the Rust side sends. */
-  size: number | bigint;
+  /** Bytes. Null when the machine has not measured it. */
+  size: number | bigint | null;
   /** Already formatted. */
   at?: string | null;
   ondownload?: () => void;

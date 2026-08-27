@@ -1,6 +1,7 @@
 @use "../../tokens/mixins" as *;
 
 .tc-glyph {
+  position: relative;
   flex: none;
   display: grid;
   place-items: center;
@@ -10,14 +11,43 @@
     display: block;
   }
 
-  // Working: an arc sweeping a ring. Round means the machine is dealing with it.
-  &.is-working i {
-    width: 86%;
-    height: 86%;
+  // Working and stalled are the same disc. The ring under it is deliberate:
+  // motion is otherwise the only thing separating working from done, and a
+  // screenshot, a notification thumbnail and prefers-reduced-motion all have no
+  // motion at all.
+  &.is-working i,
+  &.is-stalled i {
+    width: 60%;
+    height: 60%;
     border-radius: 50%;
-    border: 1.5px solid var(--tc-rule-2);
-    border-top-color: var(--tc-working);
-    animation: tc-glyph-spin 1.5s linear infinite;
+    background: var(--tc-working);
+  }
+
+  &.is-working::before,
+  &.is-stalled::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid color-mix(in srgb, var(--tc-working) 55%, transparent);
+  }
+
+  &.is-working::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    animation: tc-glyph-pulse 1.9s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+  }
+
+  // A stalled agent stops pulsing and turns pink. Absence of motion is the
+  // signal, which is the honest way round: nothing is happening, so nothing moves.
+  &.is-stalled i {
+    background: var(--tc-attn);
+  }
+
+  &.is-stalled::before {
+    border-color: color-mix(in srgb, var(--tc-attn) 55%, transparent);
   }
 
   // Blocked: the one angular mark in the system. Angular means you are the blocker.
@@ -65,14 +95,23 @@
   }
 }
 
-@keyframes tc-glyph-spin {
-  to {
-    transform: rotate(360deg);
+@keyframes tc-glyph-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--tc-working) 62%, transparent);
+    opacity: 1;
+  }
+  70% {
+    box-shadow: 0 0 0 0.6em transparent;
+    opacity: 0.35;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    opacity: 1;
   }
 }
 
 @include reduced-motion {
-  .tc-glyph.is-working i {
+  .tc-glyph.is-working::after {
     animation: none;
   }
 }

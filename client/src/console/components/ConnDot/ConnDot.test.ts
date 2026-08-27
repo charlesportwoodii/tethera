@@ -13,6 +13,13 @@ describe("ConnDot", () => {
     expect(getByText("via relay · 112 ms")).toBeInTheDocument();
   });
 
+  it("reads as connected while the path is still unclassified", () => {
+    const { getByText, container } = render(ConnDot, { props: { link: "unknown" } });
+    // Reachable but unclassified is not offline, and the dot must not go hollow.
+    expect(getByText("connected")).toBeInTheDocument();
+    expect(container.querySelector(".tc-conn")?.className).not.toContain("is-offline");
+  });
+
   it("shows when it was last seen instead of a round trip when offline", () => {
     const { getByText } = render(ConnDot, {
       props: { link: "offline", rttMs: 38, lastSeen: "2d" },
@@ -21,9 +28,9 @@ describe("ConnDot", () => {
     expect(getByText("no route · 2d")).toBeInTheDocument();
   });
 
-  it("drops the figure entirely when there is nothing to report", () => {
-    const { getByText } = render(ConnDot, { props: { link: "offline" } });
-    expect(getByText("no route")).toBeInTheDocument();
+  it("omits the figure entirely when a path has not settled", () => {
+    const { getByText } = render(ConnDot, { props: { link: "direct" } });
+    expect(getByText("direct")).toBeInTheDocument();
   });
 
   it("appends a note after the figure", () => {

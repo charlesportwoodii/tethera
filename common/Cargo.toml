@@ -12,13 +12,20 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+# The log formatters both binaries share. A line format is a contract between
+# whoever writes a log and whoever reads it, so it is written once.
+curia = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 subtle = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true }
+unicode-width = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+postcard = { workspace = true }
 
 [[test]]
 name = "integration"

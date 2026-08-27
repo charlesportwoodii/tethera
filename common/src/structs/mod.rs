@@ -1,5 +1,11 @@
 pub mod agent;
+pub mod asset;
+pub mod client;
+pub mod conversation;
 pub mod device;
+pub mod ids;
+pub mod link;
 pub mod pairing;
+pub mod primitives;
 pub mod terminal;
 pub mod transcript;

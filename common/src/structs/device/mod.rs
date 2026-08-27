@@ -12,7 +12,12 @@ pub struct Device {
     pub name: String,
     pub endpoint_id: String,
     pub state: DeviceState,
+    // ts-rs maps i64 to bigint, and these reach the client as JSON where
+    // `JSON.parse` never produces one. Without the override the binding
+    // describes a runtime value that cannot occur.
+    #[ts(type = "number | null")]
     pub paired_at: Option<i64>,
+    #[ts(type = "number | null")]
     pub last_seen_at: Option<i64>,
 }
 

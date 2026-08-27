@@ -1,0 +1,99 @@
+.tc-fp {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1;
+
+  &__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: var(--tc-surface-2);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+
+  // Source and diffs keep the terminal ground: they are machine text, and the
+  // app is paper.
+  &__code {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin: 0;
+    background: var(--tc-term-bg);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-family: var(--tc-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--tc-term-fg);
+    // A horizontal scroller inside a vertical one is unusable with a thumb.
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  &__line {
+    display: block;
+
+    &.is-add {
+      color: var(--tc-ok);
+    }
+
+    &.is-del {
+      color: var(--tc-attn);
+    }
+
+    &.is-hunk {
+      color: var(--tc-ink-3);
+    }
+  }
+
+  &__image {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    background: var(--tc-term-bg);
+    border-radius: 10px;
+    padding: 10px;
+    overflow: auto;
+
+    img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 4px;
+    }
+  }
+
+  &__waiting,
+  &__none {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    text-align: center;
+    background: var(--tc-surface-2);
+    border-radius: 10px;
+    padding: 30px;
+
+    p {
+      margin: 0;
+      font-size: 13px;
+      color: var(--tc-ink-3);
+      max-width: 34ch;
+      line-height: 1.5;
+    }
+  }
+
+  &__truncated {
+    flex: none;
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+  }
+}

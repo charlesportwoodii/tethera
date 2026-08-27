@@ -7,40 +7,88 @@
   font-family: var(--tc-mono);
   font-size: 11px;
   line-height: 1.5;
-  padding: 6px 16px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
+  padding: 6px 0;
 
-  &__line {
+  // A pane is a grid, so a row is one line and never wraps. Wrapping would
+  // reflow output that was laid out in columns, which is worse than a scroller.
+  &__row {
+    position: relative;
     white-space: pre;
-    // A pane is a grid. Wrapping would reflow output that was laid out in columns.
-    overflow: hidden;
+    padding: 0 16px;
+    min-height: 1.5em;
+  }
 
-    &.is-dim {
-      color: var(--tc-term-dim);
+  &__run {
+    // Runs are inline so a row stays one line box; a background on a run has to
+    // reach the full line height or reverse video draws a gapped stripe.
+    display: inline;
+    // Set per run as custom properties rather than as a style string: a raw
+    // declaration carrying var() is rejected outright by some parsers, and a
+    // custom property accepts any token.
+    color: var(--tc-run-fg, inherit);
+    background: var(--tc-run-bg, transparent);
+  }
+
+  .is-bold {
+    font-weight: 700;
+  }
+  .is-dim {
+    opacity: 0.6;
+  }
+  .is-italic {
+    font-style: italic;
+  }
+  .is-underline {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .is-strike {
+    text-decoration: line-through;
+  }
+  .is-underline.is-strike {
+    text-decoration: underline line-through;
+  }
+
+  // Hidden means the pane hid it. Transparent rather than removed, so the cells
+  // still occupy their columns — but it must not come back on selection either.
+  .is-hidden {
+    color: transparent;
+    user-select: none;
+  }
+
+  .is-blink {
+    animation: tc-term-blink 1.1s step-end infinite;
+  }
+
+  // Positioned in ch units against the row, which is exact in a monospace face
+  // and needs no measurement.
+  &__cursor {
+    position: absolute;
+    top: 0.15em;
+    width: 1ch;
+    height: 1.2em;
+    background: var(--tc-ok);
+    opacity: 0.85;
+    pointer-events: none;
+
+    &.is-underline {
+      top: auto;
+      bottom: 0.1em;
+      height: 2px;
     }
-    &.is-ok {
-      color: var(--tc-ok);
-    }
-    &.is-accent {
-      color: var(--tc-accent);
-    }
-    &.is-warn {
-      color: var(--tc-working);
-    }
-    &.is-attn {
-      color: var(--tc-attn);
+
+    &.is-bar {
+      width: 2px;
     }
   }
 
-  &__cursor {
-    display: inline-block;
-    width: 6px;
-    height: 12px;
-    background: var(--tc-ok);
-    vertical-align: -2px;
-    animation: tc-term-blink 1.1s step-end infinite;
+  &__closed {
+    margin: 10px 16px 4px;
+    padding: 8px 10px;
+    border-radius: var(--tc-r-chip);
+    background: var(--tc-term-chrome);
+    font-size: 11px;
+    color: var(--tc-term-dim);
   }
 }
 
@@ -51,7 +99,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tc-term__cursor {
+  .tc-term .is-blink {
     animation: none;
   }
 }

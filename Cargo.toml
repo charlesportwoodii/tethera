@@ -3,7 +3,7 @@
 # workspace whose member manifest does not exist yet.
 members = [
     "common", "transport", "server/entity", "server/migration", "server/server", "relay",
-    "client/src-tauri",
+    "client/core", "client/src-tauri",
 ]
 resolver = "2"
 
@@ -44,13 +44,43 @@ sha2 = { version = "^0.10" }
 qrcode = { version = "^0.14", default-features = false }
 chrono = { version = "^0.4", features = ["serde"] }
 url = { version = "^2.5" }
+base64 = { version = "^0.22" }
 rand = { version = "^0.8" }
 libc = { version = "^0.2" }
 rustls = { version = "^0.23", default-features = false, features = [
     "ring", "std", "tls12", "logging",
 ] }
 rustls-pemfile = { version = "^2" }
+moka = { version = "^0.12", features = ["sync"] }
 tempfile = { version = "^3" }
+uuid = { version = "^1", features = ["v4"] }
+futures-util = { version = "^0.3", default-features = false, features = ["std"] }
+tauri-plugin-deep-link = { version = "^2" }
+tauri-plugin-barcode-scanner = { version = "^2" }
+tauri-plugin-biometric = { version = "^2" }
+tauri-plugin-dialog = { version = "^2" }
+tauri-plugin-fs = { version = "^2" }
+# Pinned by git, not by version. The crates.io name `tauri-plugin-keyring`
+# belongs to a different, unrelated plugin by another author, so a version pin
+# resolves to somebody else's credential store.
+tauri-plugin-keyring = { git = "https://github.com/charlesportwoodii/tauri-plugin-keyring", branch = "master" }
+# Android only, for the ndk-context shim in client/src-tauri/src/lib.rs. tao 0.35
+# (Tauri 2.11) stopped initializing ndk-context (tauri-apps/tao#1154), so the
+# activity has to bridge it and every crate that reads the Android context -
+# the keyring store and iroh's network watcher among them - aborts without it.
+# `jni` matches tao 0.35's own JNI bindings; a different major would hand the
+# shim a JNIEnv from a different ABI.
+jni = { version = "^0.21" }
+ndk-context = { version = "^0.1" }
+# Structured logging. One event goes to a human-readable console line and to a
+# rotated JSON file, so the same run is both watchable and queryable.
+curia = { version = "^0.2" }
+# The same logging on the client, plus a sink that reaches the webview so the
+# front end and the Rust side appear in one stream.
+tauri-plugin-curia = { git = "https://github.com/charlesportwoodii/tauri-plugin-curia", tag = "0.2.0" }
+vte = { version = "^0.15" }
+unicode-width = { version = "^0.2" }
+portable-pty = { version = "^0.9" }
 
 [profile.release]
 opt-level = 3

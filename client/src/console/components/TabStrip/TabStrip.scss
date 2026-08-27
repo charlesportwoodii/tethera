@@ -9,6 +9,30 @@
     display: none;
   }
 
+  &__first,
+  &__none {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    padding: 5px 11px;
+    border: 0;
+    border-radius: var(--tc-r-chip);
+    font-family: var(--tc-mono);
+    font-size: 10px;
+  }
+
+  &__first {
+    background: var(--tc-accent);
+    color: var(--tc-accent-ink);
+    cursor: pointer;
+  }
+
+  &__none {
+    background: none;
+    color: var(--tc-term-dim);
+  }
+
   &__tab {
     display: flex;
     align-items: center;

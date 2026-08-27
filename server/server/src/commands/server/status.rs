@@ -1,5 +1,7 @@
+use crate::commands::server::process::RunningProcess;
 use crate::config::ApplicationConfig;
 use crate::identity::Identity;
+use crate::machine::MachineAddress;
 use std::sync::Arc;
 
 #[derive(clap::Args, Debug, Clone)]
@@ -14,12 +16,52 @@ impl Config {
 
         println!("data dir:    {}", config.data_dir.display());
 
+        println!("bind port:   {}", config.bind_port);
+
+        // A pidfile survives a crash, so the file alone is not evidence. Saying
+        // "yes" about a process that is gone sends an operator looking for a
+        // server that is not there.
         match Self::read_pid(&config)? {
-            Some(pid) => println!("running:     yes, pid {pid}"),
+            Some(pid) if RunningProcess::is_running(pid) => {
+                println!("running:     yes, pid {pid}")
+            }
+            Some(pid) => println!(
+                "running:     no; a stale pidfile names pid {pid}. \
+                 `tethera server stop` clears it"
+            ),
             None => println!("running:     no"),
         }
 
+        Self::report_reachability(&config);
+
         Ok(())
+    }
+
+    // Where the running server last said it could be reached. Absent or stale
+    // means nothing is publishing it, which is the same signal `tethera pair`
+    // uses to decide whether anything will answer a scanned code.
+    fn report_reachability(config: &ApplicationConfig) {
+        let now = chrono::Utc::now().timestamp();
+
+        let Some(record) = MachineAddress::read(config).filter(|record| record.is_fresh(now))
+        else {
+            println!("reachable:   nothing published; no server is publishing addresses");
+
+            return;
+        };
+
+        println!(
+            "reachable:   {}",
+            if record.direct_addrs.is_empty() {
+                "no direct addresses yet".to_string()
+            } else {
+                record.direct_addrs.join(", ")
+            }
+        );
+
+        if let Some(relay) = &record.relay {
+            println!("relay:       {relay}");
+        }
     }
 
     fn read_pid(config: &ApplicationConfig) -> anyhow::Result<Option<u32>> {

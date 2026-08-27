@@ -1,0 +1,38 @@
+.tc-ctx {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+
+  &__track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--tc-surface-3);
+    overflow: hidden;
+  }
+
+  &__fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--tc-accent);
+  }
+
+  // The one figure that says the session is about to hit a wall, so it changes
+  // colour before it gets there rather than at the moment it does.
+  &__fill.is-warn {
+    background: var(--tc-working);
+  }
+
+  &__labels {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-family: var(--tc-mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+}

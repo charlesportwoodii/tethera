@@ -1,0 +1,30 @@
+
+
+✻ Brewed for 6s · done 3:26 PM
+
+❯ Use the Write tool to create
+  C:/Users/charl/AppData/Local/Temp/tethera-perm-probe.txt containing exactly:
+  hello
+
+● Write(C:/Users/charl/AppData/Local/Temp/tethera-perm-probe.txt)
+  ⎿  User rejected write to ..\..\AppData\Local\Temp\tethera-perm-probe.txt
+      1 hello
+
+✻ Crunched for 2s · done 3:27 PM
+
+❯ Call AskUserQuestion once: header "Route", question "Which route owns
+  pair?", options Rewrite, Register. Nothing else.
+───────────────────────────────────────────────────────────────────────────────
+ ☐ Route
+
+Which route owns pair?
+
+❯ 1. Rewrite
+     The rewrite route owns pair.
+  2. Register
+     The register route owns pair.
+  3. Type something.
+───────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

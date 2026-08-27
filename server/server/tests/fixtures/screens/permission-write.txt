@@ -1,0 +1,30 @@
+
+
+❯ Run this exact bash command and nothing else: sha256sum Cargo.toml
+
+  Ran 1 shell command
+
+● 783bbc1aac0c48bf21aeb94413ec48b1eebd84fe65e3169ef91f01fb14d1fc82 — SHA-256 of
+  Cargo.toml.
+
+✻ Brewed for 6s · done 3:26 PM
+
+❯ Use the Write tool to create
+  C:/Users/charl/AppData/Local/Temp/tethera-perm-probe.txt containing exactly:
+  hello
+
+● Write(C:/Users/charl/AppData/Local/Temp/tethera-perm-probe.txt)
+
+───────────────────────────────────────────────────────────────────────────────
+ Opened changes in Visual Studio Code ⧉
+ ..\..\AppData\Local\Temp\tethera-perm-probe.txt
+ Save file to continue…
+
+ Do you want to create tethera-perm-probe.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file
+      commands) for this session; Yes, and always allow access to
+      C:\Users\charl\AppData\Local\Temp for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

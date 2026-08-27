@@ -1,4 +1,11 @@
 mod agent;
+mod asset;
+mod conversation;
 mod device;
+mod ids;
+mod link;
 mod pairing;
+mod primitives;
+mod question;
+mod terminal;
 mod transcript;

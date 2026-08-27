@@ -1,0 +1,11 @@
+.tc-braille {
+  font-family: var(--tc-mono);
+  line-height: 1;
+  color: var(--tc-working);
+  flex: none;
+  display: inline-block;
+  text-align: center;
+  // Braille cells are all the same width, but reserving it stops the row from
+  // twitching by a fraction as frames change.
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Without this the barcode scanner fails at run time rather than at build
+	     time, and the message names neither the key nor the plugin. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Read the pairing code shown by your machine</string>
+
+	<!-- The identity key lives in the Keychain. Without the entitlement the
+	     store is unavailable and the app cannot mint or read its own identity. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)</string>
+	</array>
+</dict>
+</plist>

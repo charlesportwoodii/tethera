@@ -10,13 +10,13 @@
 
 <div
   class="tc-turn"
-  class:is-you={role === "you"}
+  class:is-you={role === "operator"}
   class:is-marked={marked}
   data-role={role}
 >
   <time class="tc-turn__time" datetime={iso}>
     {time}
-    {#if role === "you"}
+    {#if role === "operator"}
       <em class="tc-turn__caret" aria-hidden="true">&#10095;</em>
     {/if}
   </time>

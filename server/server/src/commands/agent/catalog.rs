@@ -1,4 +1,5 @@
 use crate::config::ApplicationConfig;
+use crate::machine::Installed;
 use std::sync::Arc;
 use tethera_common::structs::agent::Agent;
 use tethera_common::traits::AgentTrait;
@@ -11,10 +12,20 @@ impl Config {
     // not a logging channel.
     pub async fn run(&self, _config: Arc<ApplicationConfig>) -> anyhow::Result<()> {
         for agent in Agent::ALL {
-            let caps = agent.capabilities();
+            let profile = agent.profile();
+
+            // Every agent this build can drive, with whether the machine
+            // actually has it. A client is sent only the installed ones, and an
+            // operator asking why a harness is missing from their phone needs to
+            // see the row that is not being sent.
             println!(
-                "{agent:?}\tresume={}\tinterrupt={}\tfile_upload={}\tquestions={}",
-                caps.resume, caps.interrupt, caps.file_upload, caps.questions
+                "{}\t{}\tinstalled={}\tversion={}\tresume={}\ttranscript={}",
+                profile.id.as_str(),
+                profile.label,
+                Installed::has(agent.binary()),
+                profile.version.as_deref().unwrap_or("unknown"),
+                profile.supports_resume,
+                profile.provides_transcript
             );
         }
 

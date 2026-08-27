@@ -1,0 +1,41 @@
+[package]
+name = "tethera-client-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+autotests = false
+
+[lib]
+name = "tethera_client_core"
+path = "src/lib.rs"
+
+[features]
+# The in-memory secret store. Enabled by this crate's own tests so a suite never
+# reaches a real platform keychain.
+testing = []
+
+[dependencies]
+tethera-common = { path = "../../common" }
+tethera-transport = { path = "../../transport" }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+iroh = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+futures-util = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }
+tethera-client-core = { path = ".", features = ["testing"] }
+# The loopback helpers the fake machine binds through.
+tethera-transport = { path = "../../transport", features = ["testing"] }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities the main window holds on every platform.",
+  "description": "Capabilities the main window holds on every platform. No keyring permission is granted: the identity key is read and written only from Rust, so a compromised webview cannot reach the credential that identifies this device to every machine it is paired with.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:event:default", "deep-link:default"]
 }

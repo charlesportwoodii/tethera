@@ -26,14 +26,37 @@ impl Config {
 
     // The child is given the resolved data dir rather than inheriting the
     // caller's environment, so a detached server keeps the state the operator
-    // asked for instead of falling back to the platform default.
-    fn detached_arguments(config: &ApplicationConfig) -> [std::ffi::OsString; 4] {
-        [
+    // asked for instead of falling back to the platform default. The label goes
+    // the same way; the relay token does not, because argv is readable.
+    fn detached_arguments(config: &ApplicationConfig) -> Vec<std::ffi::OsString> {
+        let mut arguments = vec![
             std::ffi::OsString::from("--data-dir"),
             config.data_dir.clone().into_os_string(),
-            std::ffi::OsString::from("server"),
-            std::ffi::OsString::from("start"),
-        ]
+        ];
+
+        if let Some(label) = &config.label {
+            arguments.push(std::ffi::OsString::from("--label"));
+            arguments.push(std::ffi::OsString::from(label));
+        }
+
+        if let Some(url) = &config.relay_url {
+            arguments.push(std::ffi::OsString::from("--relay-url"));
+            arguments.push(std::ffi::OsString::from(url));
+        }
+
+        arguments.push(std::ffi::OsString::from("server"));
+        arguments.push(std::ffi::OsString::from("start"));
+
+        arguments
+    }
+
+    // The relay's shared secret reaches the child the way it reached this
+    // process. A command line is readable through ps and lands in the shell
+    // history; an environment variable is readable only by the owner.
+    fn detached_environment(command: &mut std::process::Command, config: &ApplicationConfig) {
+        if let Some(token) = &config.relay_token {
+            command.env(crate::commands::Cli::RELAY_TOKEN_ENV, token);
+        }
     }
 
     // Windows has no fork, so the double-fork daemon idiom is unavailable and
@@ -45,10 +68,13 @@ impl Config {
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
-        let child = std::process::Command::new(std::env::current_exe()?)
+        let mut command = std::process::Command::new(std::env::current_exe()?);
+        command
             .args(Self::detached_arguments(config))
-            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-            .spawn()?;
+            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        Self::detached_environment(&mut command, config);
+
+        let child = command.spawn()?;
 
         std::fs::write(config.pid_path(), child.id().to_string())?;
         println!("tethera server started, pid {}", child.id());
@@ -62,6 +88,7 @@ impl Config {
 
         let mut command = std::process::Command::new(std::env::current_exe()?);
         command.args(Self::detached_arguments(config));
+        Self::detached_environment(&mut command, config);
 
         unsafe {
             command.pre_exec(|| {

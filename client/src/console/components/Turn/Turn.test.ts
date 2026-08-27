@@ -4,12 +4,12 @@ import Turn from "./Turn.svelte";
 
 describe("Turn", () => {
   it("marks whose turn it is in the DOM, since the labels are gone", () => {
-    const { container } = render(Turn, { props: { role: "you", time: "14:18" } });
-    expect(container.querySelector(".tc-turn")).toHaveAttribute("data-role", "you");
+    const { container } = render(Turn, { props: { role: "operator", time: "14:18" } });
+    expect(container.querySelector(".tc-turn")).toHaveAttribute("data-role", "operator");
   });
 
   it("shows the shell caret only on your own turns", () => {
-    const you = render(Turn, { props: { role: "you", time: "14:18" } });
+    const you = render(Turn, { props: { role: "operator", time: "14:18" } });
     expect(you.container.querySelector(".tc-turn__caret")).toBeInTheDocument();
     you.unmount();
 
@@ -18,7 +18,7 @@ describe("Turn", () => {
   });
 
   it("hides the caret from assistive tech — it is decoration, not a word", () => {
-    const { container } = render(Turn, { props: { role: "you", time: "14:18" } });
+    const { container } = render(Turn, { props: { role: "operator", time: "14:18" } });
     expect(container.querySelector(".tc-turn__caret")).toHaveAttribute("aria-hidden", "true");
   });
 

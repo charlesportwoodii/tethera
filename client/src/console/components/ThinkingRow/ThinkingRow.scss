@@ -1,0 +1,102 @@
+.tc-think {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 13px;
+  background: var(--tc-surface-2);
+  border-radius: 10px;
+  min-width: 0;
+
+  &__top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__verb {
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--tc-ink);
+    flex: none;
+  }
+
+  &__elapsed {
+    font-family: var(--tc-mono);
+    font-size: 11px;
+    color: var(--tc-ink-3);
+    font-variant-numeric: tabular-nums;
+    flex: none;
+  }
+
+  &__stop {
+    margin-left: auto;
+    flex: none;
+    border: 0;
+    background: none;
+    font-family: var(--tc-mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+    padding: 4px 8px;
+    border-radius: 5px;
+    box-shadow: inset 0 0 0 1px var(--tc-rule-2);
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 2px;
+    }
+  }
+
+  &__activity {
+    font-family: var(--tc-mono);
+    font-size: 11px;
+    color: var(--tc-ink-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  &.is-dense &__activity {
+    flex: 1;
+    padding-left: 6px;
+  }
+
+  &__stats {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+
+  &__stat {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    font-variant-numeric: tabular-nums;
+
+    b {
+      font-family: var(--tc-mono);
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--tc-ink);
+    }
+
+    span {
+      font-family: var(--tc-mono);
+      font-size: 8.5px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--tc-ink-3);
+    }
+  }
+
+  &__ctx {
+    min-width: 150px;
+    flex: 1;
+  }
+}

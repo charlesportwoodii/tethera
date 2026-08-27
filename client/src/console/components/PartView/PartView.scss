@@ -1,9 +1,63 @@
 .tc-part {
-  &__text {
-    margin: 0;
-    font-size: 13.5px;
+  // A thumbnail is a control, not decoration: it opens the same viewer a card
+  // does, so the image being visible never costs the full view, the size or Save.
+  &__thumb {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    align-items: flex-start;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+
+    img {
+      display: block;
+      // A tall screenshot at full width would eat the whole transcript. The card
+      // was implicitly holding this line; something has to keep holding it.
+      max-height: 260px;
+      max-width: 100%;
+      width: auto;
+      border-radius: var(--tc-r-chip);
+      background: var(--tc-surface-2);
+      object-fit: contain;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: 3px;
+    }
+  }
+
+  &__thumbname {
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    color: var(--tc-ink-3);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // The body a tool fold reveals.
+  //
+  // Wraps rather than scrolling sideways, for the reason every other long thing
+  // in this system does: a horizontal scroller inside a vertical one is unusable
+  // with a thumb. Capped so one noisy command cannot bury the turns around it.
+  &__body {
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    border-radius: var(--tc-r-chip);
+    background: var(--tc-term-bg);
+    color: var(--tc-term-fg);
+    font-family: var(--tc-mono);
+    font-size: 11px;
     line-height: 1.55;
-    color: inherit;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 320px;
+    overflow-y: auto;
   }
 
   // A part this build does not know still renders: the gateway sends the source

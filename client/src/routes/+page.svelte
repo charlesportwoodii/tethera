@@ -1,343 +1,324 @@
 <script lang="ts">
-  import {
-    AskBlock,
-    Button,
-    Chip,
-    CodeSlots,
-    Composer,
-    ConnDot,
-    Drawer,
-    FileCard,
-    Icon,
-    KeyBar,
-    Label,
-    NavBar,
-    PartView,
-    StatusGlyph,
-    TabStrip,
-    TerminalView,
-    Timeline,
-    ToolFold,
-    Tree,
-    TreeNode,
-    TreeTwig,
-    Turn,
-    Toggle,
-    type DrawerHeight,
-    type GlyphState,
-  } from "$console";
-  import type { Part } from "$bindings/Part";
+  import { onDestroy, onMount } from "svelte";
+  import { goto } from "$app/navigation";
+  import { Parts } from "$managers/parts";
+  import { invoke } from "@tauri-apps/api/core";
+  import { Button, ConnDot, Icon, NavBar, Tree, TreeNode, TreeTwig } from "$console";
+  import { ServerManager } from "$managers/server_manager";
+  import { DeepLink } from "$managers/deep_link";
+  import { Conversations } from "$managers/conversations";
+  import ConversationGlyph from "$components/ConversationGlyph.svelte";
+  import type { Conversation } from "$bindings/Conversation";
+  import type { ServerRow } from "$bindings/ServerRow";
 
-  // The gallery is the visual contract: every component, in isolation, with the
-  // states that are hard to reach by clicking around a real screen.
-  const GLYPHS: GlyphState[] = ["working", "idle", "done", "blocked", "offline", "set", "unset"];
+  const manager = new ServerManager(invoke);
+  const rows = manager.rows;
+  const sweeping = manager.sweeping;
 
-  let harness = $state("claude");
-  let notify = $state(true);
-  let code = $state("7329");
-  let draft = $state("");
-  let drawer = $state<DrawerHeight>("half");
-  let tab = $state("b");
+  let link: DeepLink | null = null;
+  let unfollow: (() => void) | null = null;
 
-  const TABS = [
-    { id: "a", label: "1:claude", state: "blocked" as const },
-    { id: "b", label: "2:build" },
-    { id: "c", label: "3:git" },
-  ];
+  onMount(() => {
+    void start();
+  });
 
-  const TERM = [
-    { text: "charl@atlas ~/projects/tethera", tone: "dim" as const },
-    { text: "\u276F cargo test -p tethera-common" },
-    { text: "running 12 tests", tone: "accent" as const },
-    { text: "ok   agent::catalog::claude_default", tone: "ok" as const },
-    { text: "FAIL pair::uri::host_not_path", tone: "attn" as const },
-    { text: '  left:  "/pair"', tone: "warn" as const },
-    { text: "11 passed; 1 failed", tone: "dim" as const },
-  ];
+  onDestroy(() => {
+    link?.stop();
+    unfollow?.();
+  });
 
-  const PARTS: Part[] = [
-    { text: { text: "The document is explicit that pair is the URI host, not a path." } },
-    { tool_use: { name: "Bash \u00b7 grep -rn", input: "", fallback_text: "" } },
-    { file: { name: "pairing-routes.md", size: 8396n, fallback_text: "" } },
-    { unknown: { kind: "diff", fallback_text: "--- a/deeplink.ts\n+++ b/deeplink.ts" } },
-  ];
+  async function start(): Promise<void> {
+    await manager.load();
+
+    link = new DeepLink((uri) => {
+      void goto(`/pair?uri=${encodeURIComponent(uri)}`);
+    });
+    await link.start();
+
+    await manager.sweep();
+
+    // What a sweep carries back is a snapshot of which sessions are attached
+    // and what each is doing. Taken once, the marks on this screen stop
+    // meaning anything the moment a session starts or finishes work.
+    unfollow = manager.follow();
+  }
+
+  function subtitle(all: ServerRow[]): string {
+    const quiet = all.filter((row) => row.link.kind === "offline").length;
+    const paired = `${all.length} paired`;
+
+    return quiet === 0 ? paired : `${paired} · ${quiet} not answering`;
+  }
+
+  // ConnDot has no "unknown" state, so a row that has not settled shows words
+  // instead of a dot rather than claiming a route nothing has measured.
+  /**
+   * Straight into the conversation from the list.
+   *
+   * The twig already says which one it is, so making the person open the
+   * machine first to reach the same row is a step that answers nothing.
+   */
+  function read(row: ServerRow, held: Conversation): void {
+    const server = encodeURIComponent(row.entry.server.id as unknown as string);
+    const id = encodeURIComponent(held.id as unknown as string);
+
+    void goto(`/conversation?server=${server}&id=${id}`);
+  }
+
+  function open(row: ServerRow): void {
+    void goto(`/server?id=${encodeURIComponent(row.entry.server.id as unknown as string)}`);
+  }
+
+  function startOn(row: ServerRow): void {
+    void goto(`/session?server=${encodeURIComponent(row.entry.server.id as unknown as string)}`);
+  }
 </script>
 
-<div class="gallery">
-  <header class="gallery__mast">
-    <span class="gallery__eyebrow">Tethera \u00b7 Console design system</span>
-    <h1>Building blocks</h1>
+{#if $rows.length === 0}
+  <NavBar title="Tethera" subtitle="no servers paired">
+    {#snippet actions()}
+      <button class="tap" onclick={() => goto("/settings")} aria-label="Settings">
+        <Icon name="settings" size={22} />
+      </button>
+    {/snippet}
+  </NavBar>
+
+  <section class="empty">
+    <Icon name="scan" size={40} label="Pair a server" />
+    <h3>No servers yet</h3>
     <p>
-      Every component in isolation. Nothing here fetches, routes, or knows what a screen is —
-      composing them into screens is the integrator's job.
+      Tethera reaches the agent sessions running on your own machines. Pair one to begin —
+      everything else on this screen appears once you have.
     </p>
-  </header>
-
-  <section class="gallery__row">
-    <h2>StatusGlyph</h2>
-    <div class="gallery__panel gallery__inline">
-      {#each GLYPHS as state (state)}
-        <span class="gallery__glyph"><StatusGlyph {state} /> <code>{state}</code></span>
-      {/each}
-    </div>
+    <Button icon="scan" onclick={() => goto("/pair")}>Pair a server</Button>
   </section>
+{:else}
+  <NavBar title="Servers" subtitle={subtitle($rows)}>
+    {#snippet actions()}
+      <button class="tap" onclick={() => goto("/settings")} aria-label="Settings">
+        <Icon name="settings" size={22} />
+      </button>
+    {/snippet}
+  </NavBar>
 
-  <section class="gallery__row">
-    <h2>ConnDot</h2>
-    <div class="gallery__panel">
-      <ConnDot link="direct" rttMs={38} />
-      <ConnDot link="relayed" rttMs={112} />
-      <ConnDot link="offline" lastSeen="2d" />
-      <ConnDot link="direct" rttMs={38} note="native" />
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>Button, Chip, Toggle</h2>
-    <div class="gallery__panel">
-      <Button icon="plus">New session</Button>
-      <Button variant="quiet">Forget this server</Button>
-      <Button disabled>Start session</Button>
-      <div class="gallery__inline">
-        <Chip
-          label="Claude Code"
-          detail="2.1.4"
-          selected={harness === "claude"}
-          onclick={() => (harness = "claude")}
-        />
-        <Chip
-          label="Codex"
-          detail="0.8"
-          selected={harness === "codex"}
-          onclick={() => (harness = "codex")}
-        />
-      </div>
-      <div class="gallery__inline">
-        <Toggle label="Push notifications" checked={notify} onchange={(v) => (notify = v)} />
-        <code>checked = {notify}</code>
-      </div>
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>NavBar</h2>
-    <div class="gallery__panel gallery__phone">
-      <NavBar title="Servers" subtitle="3 paired \u00b7 1 not answering">
-        {#snippet actions()}
-          <Icon name="scan" label="Add a server" />
-          <Icon name="settings" label="Settings" />
-        {/snippet}
-      </NavBar>
-      <NavBar title="atlas" subtitle="5 workspaces" onback={() => {}} />
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>Tree, TreeNode, TreeTwig</h2>
-    <div class="gallery__panel gallery__phone">
-      <Tree label="Servers">
-        <TreeNode state="blocked" branches>
-          <strong class="gallery__name">atlas</strong>
-          <ConnDot link="direct" rttMs={38} />
-          <TreeTwig state="blocked">
-            <div class="gallery__twig">Pairing deep link</div>
-            <div class="gallery__meta">tethera-3 \u00b7 claude</div>
-          </TreeTwig>
-          <TreeTwig state="working">
-            <div class="gallery__twig">Flaky NAT punch test</div>
-            <div class="gallery__meta">bvc-relay \u00b7 claude</div>
-          </TreeTwig>
-        </TreeNode>
-        <TreeNode state="offline" spaced dim>
-          <strong class="gallery__name">keel</strong>
-          <ConnDot link="offline" lastSeen="2d" />
-        </TreeNode>
-      </Tree>
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>Label, CodeSlots</h2>
-    <div class="gallery__panel gallery__phone">
-      <Label flush>now type the code atlas is showing</Label>
-      <CodeSlots value={code} />
-      <div class="gallery__inline" style="padding: 12px 18px">
-        <Button onclick={() => (code = code.length < 6 ? code + "4" : "")}>
-          {code.length < 6 ? "Type a digit" : "Clear"}
-        </Button>
-      </div>
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>Timeline, Turn, ToolFold, AskBlock, FileCard</h2>
-    <div class="gallery__panel gallery__phone gallery__tall">
-      <Timeline>
-        <Turn role="you" time="14:18">
-          <p>Read the pairing contract and tell me how the deep link should be routed.</p>
-        </Turn>
-        <Turn role="agent" time="14:19">
-          <p>The document is explicit that pair is the URI host, not a path.</p>
-        </Turn>
-        <Turn role="agent" time="14:19">
-          <ToolFold name="Bash \u00b7 grep -rn" detail="2 hits" />
-        </Turn>
-        <Turn role="agent" time="14:22">
-          <ToolFold name="deeplink.ts" detail="+3 -1" tone="ok" />
-        </Turn>
-        <Turn role="agent" time="14:31">
-          <FileCard name="pairing-routes.md" size={8396n} at="14:31" />
-        </Turn>
-        <Turn role="agent" time="14:29" marked>
-          <AskBlock
-            prompt="Which route should own tethera://pair?"
-            waiting="3m"
-            options={[
-              { label: "Rewrite before the router sees it.", detail: "One place to fix." },
-              { label: "Register pair as a real route.", detail: "Fights the framework." },
-              { label: "Handle it outside the router.", detail: "More code, fewer surprises." },
-            ]}
-          />
-        </Turn>
-      </Timeline>
-      <Composer value={draft} oninput={(v) => (draft = v)} onattach={() => {}} />
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>PartView \u2014 every Part the wire can send</h2>
-    <div class="gallery__panel gallery__phone">
-      <Timeline>
-        {#each PARTS as part, i (i)}
-          <Turn role="agent" time="14:2{i}">
-            <PartView {part} at="14:31" />
-          </Turn>
-        {/each}
-      </Timeline>
-    </div>
-  </section>
-
-  <section class="gallery__row">
-    <h2>Drawer, TabStrip, TerminalView, KeyBar</h2>
-    <div class="gallery__panel gallery__phone gallery__tall">
-      <Drawer
-        label="tethera-3"
-        summary="11 passed, 1 failed"
-        height={drawer}
-        onheight={(h) => (drawer = h)}
+  <Tree label="Servers">
+    {#each $rows as row (row.entry.server.id)}
+      <TreeNode
+        dim={row.link.kind === "offline"}
+        branches={row.entry.conversations.length > 0}
+        spaced
       >
-        <TabStrip tabs={TABS} activeId={tab} onselect={(id) => (tab = id)} onadd={() => {}} />
-        <TerminalView lines={TERM} cursor />
-        <KeyBar />
-      </Drawer>
-    </div>
-    <p class="gallery__note">The head cycles peek \u2192 half \u2192 full. Current: <code>{drawer}</code></p>
-  </section>
-</div>
+        <!-- The console draws `idle` as a grey hollow ring, which is the mark
+             for a machine that did not answer. On the column somebody scans
+             down, a machine answering in 5 ms and one that has been quiet for a
+             day were the same shape. -->
+        {#snippet glyph()}
+          <ConversationGlyph
+            state={row.link.kind === "offline" ? "offline" : "idle"}
+            bg="var(--tc-surface)"
+          />
+        {/snippet}
+
+        <div class="line">
+          <button class="row" onclick={() => open(row)}>
+            <strong class="name">{row.entry.server.label}</strong>
+            <span class="meta">{row.entry.server.os} · {row.entry.server.arch}</span>
+
+            {#if row.refusal}
+              <span class="meta refused">would not accept this device</span>
+            {:else if row.link.kind !== "unknown"}
+              <ConnDot link={row.link.kind} rttMs={row.link.rtt_ms} />
+            {:else}
+              <span class="meta">finding a route…</span>
+            {/if}
+          </button>
+
+          <!-- Per server, on the server's own row. A single button at the foot
+               would belong to whichever machine you last thought about, which is
+               not a question this screen can answer. -->
+          <button
+            class="bare start"
+            onclick={() => startOn(row)}
+            aria-label={`New session on ${row.entry.server.label}`}
+          >
+            <Icon name="plus" />
+          </button>
+        </div>
+
+        <!-- Remembered when the machine is not answering, which is the one
+             useful thing on an otherwise empty row: what was running when it
+             went quiet. -->
+        {#each row.entry.conversations as held (held.id)}
+          <TreeTwig>
+            {#snippet glyph()}
+              <ConversationGlyph state={Conversations.glyph(held, row.link.kind !== "offline")} />
+            {/snippet}
+            <button class="open" type="button" onclick={() => read(row, held)}>
+              <div class="twig">
+                <b>{Conversations.title(held)}</b>
+                {#if Conversations.age(held)}<span class="age">{Conversations.age(held)}</span>{/if}
+              </div>
+              <div class="meta">{Conversations.meta(held)}</div>
+              {#if held.preview}
+                <div class="said">“{Parts.plain(held.preview)}”</div>
+              {/if}
+            </button>
+          </TreeTwig>
+        {/each}
+      </TreeNode>
+    {/each}
+  </Tree>
+
+  <!-- The scan mark in the NavBar is the same action, but it is small and sits
+       against the status bar. Pairing a second machine is a first-class thing to
+       do from this screen, so it gets a control that reads as one. -->
+  <div class="foot">
+    <Button icon="scan" onclick={() => goto("/pair")}>Pair another server</Button>
+    <Button variant="quiet" disabled={$sweeping} onclick={() => manager.sweep()}>
+      {$sweeping ? "Checking…" : "Refresh"}
+    </Button>
+  </div>
+{/if}
 
 <style lang="scss">
-  .gallery {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 48px 20px 120px;
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 64px 24px;
+    text-align: center;
 
-    &__eyebrow {
-      font-family: var(--tc-mono);
-      font-size: 11px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--tc-ink-3);
+    h3 {
+      margin: 0;
+      font-size: 1.1rem;
     }
 
-    &__mast {
-      margin-bottom: 40px;
-
-      h1 {
-        margin: 12px 0 10px;
-        font-size: 2.4rem;
-        letter-spacing: -0.04em;
-      }
-
-      p {
-        margin: 0;
-        max-width: 64ch;
-        color: var(--tc-ink-2);
-      }
+    p {
+      margin: 0 0 8px;
+      max-width: 46ch;
+      color: var(--tc-ink-2);
+      font-size: 14px;
+      line-height: 1.5;
     }
+  }
 
-    &__row {
-      margin-bottom: 36px;
+  // A glyph is not a target. Forty-four is the smallest square a thumb hits
+  // reliably, and the icon inside it stays small - the padding is the target,
+  // not the mark.
+  .tap {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin: -11px -11px -11px 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+  }
 
-      h2 {
-        font-size: 0.95rem;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        color: var(--tc-ink-2);
-        margin: 0 0 10px;
-      }
-    }
+  .bare,
+  .row {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+  }
 
-    &__panel {
-      background: var(--tc-surface);
-      border-radius: 12px;
-      padding: 18px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
+  .line {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+  }
 
-    &__phone {
-      max-width: 340px;
-      padding: 0 0 12px;
-    }
+  .row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
 
-    &__tall {
-      height: 560px;
-      overflow: hidden;
-    }
+  // A finger, not a cursor. The mark is ~18px; without a target built around it
+  // the control is a quarter of the 48dp Android asks for and misses more often
+  // than it hits.
+  //
+  // Sized with padding rather than negative margins: pulling the box outside the
+  // node's content area put it where the tap never arrived, which reads exactly
+  // like a dead button.
+  .start {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    color: var(--tc-ink-3);
+  }
 
-    &__inline {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 12px;
-    }
+  .name {
+    font-family: var(--tc-mono);
+    font-size: 16px;
+    letter-spacing: -0.02em;
+  }
 
-    &__glyph {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-    }
+  .meta {
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    color: var(--tc-ink-3);
+  }
 
-    &__name {
-      font-family: var(--tc-mono);
-      font-size: 16px;
-      letter-spacing: -0.02em;
-    }
+  .refused {
+    color: var(--tc-warn, var(--tc-ink-2));
+  }
 
-    &__twig {
+  .open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+  }
+
+  .twig {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+
+    b {
       font-size: 13.5px;
       font-weight: 600;
       letter-spacing: -0.015em;
     }
+  }
 
-    &__meta {
-      font-family: var(--tc-mono);
-      font-size: 9.5px;
-      color: var(--tc-ink-3);
-      margin-top: 2px;
-    }
+  .age {
+    font-family: var(--tc-mono);
+    font-size: 10px;
+    color: var(--tc-ink-3);
+    margin-left: auto;
+  }
 
-    &__note {
-      margin: 10px 0 0;
-      font-size: 13px;
-      color: var(--tc-ink-3);
-    }
+  .said {
+    margin-top: 3px;
+    font-size: 12.5px;
+    color: var(--tc-ink-2);
+    line-height: 1.4;
+  }
 
-    code {
-      font-family: var(--tc-mono);
-      font-size: 11.5px;
-      color: var(--tc-ink-3);
-    }
+  .foot {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 24px 18px 32px;
   }
 </style>

@@ -1,0 +1,4 @@
+{"cwd":"/home/dev/project","sessionId":"11111111-2222-3333-4444-555555555555","version":"2.1.246","userType":"external","entrypoint":"cli","gitBranch":"main","isSidechain":false,"type":"user","uuid":"x1","timestamp":"2026-01-01T10:00:01.000Z","promptSource":"typed","message":{"role":"user","content":"first"}}
+{this is not json at all
+{"cwd":"/home/dev/project","sessionId":"11111111-2222-3333-4444-555555555555","version":"2.1.246","userType":"external","entrypoint":"cli","gitBranch":"main","isSidechain":false,"type":"assistant","uuid":"x2","timestamp":"2026-01-01T10:00:02.000Z","requestId":"req_x","message":{"role":"assistant","content":[{"type":"text","text":"answered"}]}}
+{"cwd":"/home/dev/project","sessionId":"11111111-2222-3333-4

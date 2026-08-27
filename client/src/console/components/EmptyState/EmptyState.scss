@@ -1,0 +1,46 @@
+.tc-empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 30px 26px;
+  text-align: center;
+
+  &__mark {
+    width: 74px;
+    height: 74px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--tc-surface-2);
+    color: var(--tc-ink-3);
+    flex: none;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    color: var(--tc-ink);
+  }
+
+  &__body {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--tc-ink-3);
+    line-height: 1.5;
+    max-width: 34ch;
+  }
+
+  &__actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 2px;
+  }
+}

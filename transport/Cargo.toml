@@ -9,6 +9,11 @@ autotests = false
 name = "tethera_transport"
 path = "src/lib.rs"
 
+[features]
+# The loopback helpers. Enabled by this crate's own tests, and by the server's
+# dev-dependencies so the protocol suite dials a real endpoint pair.
+testing = []
+
 [dependencies]
 tethera-common = { path = "../common" }
 anyhow = { workspace = true }
@@ -22,6 +27,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+# The loopback helpers this crate's own tests dial through.
+tethera-transport = { path = ".", features = ["testing"] }
 
 [[test]]
 name = "integration"

@@ -12,7 +12,9 @@ export type IconName =
   | "scan"
   | "settings"
   | "retry"
-  | "download";
+  | "download"
+  | "check"
+  | "close";
 
 export interface IconProps {
   name: IconName;

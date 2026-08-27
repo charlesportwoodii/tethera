@@ -21,10 +21,13 @@ tethera-migration = { path = "../migration" }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+postcard = { workspace = true }
+serde_json = { workspace = true }
 clap = { workspace = true }
 directories = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+curia = { workspace = true }
 tracing-subscriber = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
@@ -32,12 +35,19 @@ iroh = { workspace = true }
 qrcode = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
+sha2 = { workspace = true }
+moka = { workspace = true }
+vte = { workspace = true }
+unicode-width = { workspace = true }
+portable-pty = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# The loopback helpers the protocol suite dials through.
+tethera-transport = { path = "../../transport", features = ["testing"] }
 
 [[test]]
 name = "integration"

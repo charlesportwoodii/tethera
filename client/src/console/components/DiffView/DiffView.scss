@@ -1,0 +1,76 @@
+.tc-diff {
+  border-radius: var(--tc-r-chip);
+  overflow: hidden;
+  background: var(--tc-surface-2);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    border: 0;
+    background: none;
+    padding: 7px 10px;
+    font-family: var(--tc-mono);
+    font-size: 11px;
+    color: var(--tc-ink-2);
+    text-align: left;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tc-ink);
+      outline-offset: -2px;
+    }
+  }
+
+  &__path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__count {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__added {
+    color: var(--tc-ok);
+  }
+
+  &__removed {
+    color: var(--tc-attn);
+  }
+
+  &__body {
+    font-family: var(--tc-mono);
+    font-size: 11px;
+    line-height: 1.6;
+    // A diff is laid out in columns. Wrapping would reflow it into nonsense.
+    overflow-x: auto;
+    background: var(--tc-term-bg);
+  }
+
+  &__line {
+    white-space: pre;
+    padding: 0 10px;
+    color: var(--tc-term-fg);
+
+    &.is-add {
+      color: var(--tc-ok);
+      background: color-mix(in srgb, var(--tc-ok) 12%, transparent);
+    }
+
+    &.is-del {
+      color: var(--tc-attn);
+      background: color-mix(in srgb, var(--tc-attn) 12%, transparent);
+    }
+
+    &.is-hunk {
+      color: var(--tc-ink-3);
+      background: var(--tc-surface-2);
+    }
+  }
+}

@@ -1,4 +1,6 @@
+use crate::commands::server::process::RunningProcess;
 use crate::config::ApplicationConfig;
+use crate::machine::MachineAddress;
 use anyhow::anyhow;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,8 +19,51 @@ impl Config {
             return Ok(());
         };
 
-        Self::signal(pid)?;
+        // A pidfile that outlived its process. Clearing it is the whole of what
+        // stopping means here, and refusing to would leave the operator wedged:
+        // `status` would keep reporting a dead server as running and no command
+        // could ever say otherwise.
+        if !RunningProcess::is_running(pid) {
+            let _ = std::fs::remove_file(&pid_path);
+            MachineAddress::clear(&config);
+
+            println!("no server was running; cleared a stale pidfile for pid {pid}");
+
+            return Ok(());
+        }
+
+        // Kept rather than raised. `taskkill /T` reports a failure when any
+        // process in the tree refuses, and a server's children include ones it
+        // spawned and abandoned - so it complains about a server it did kill.
+        // The question this command answers is whether the server is gone, and
+        // only the answer to that decides.
+        let complaint = Self::signal(pid).err();
+
+        // Signalling is not exiting. Unlinking the pidfile first would leave a
+        // wedged server running with nothing left that can name it, and clearing
+        // the address record would then make `tethera pair` report "no server is
+        // running" about a server that is.
+        if !RunningProcess::wait_until_gone(pid) {
+            return Err(match complaint {
+                Some(error) => error.context(format!(
+                    "pid {pid} is still running; the pidfile is left in place so it can be \
+                     stopped again"
+                )),
+                None => anyhow!(
+                    "pid {pid} did not exit; the pidfile is left in place so it can be \
+                     stopped again"
+                ),
+            });
+        }
+
         let _ = std::fs::remove_file(&pid_path);
+
+        // On Windows the kill is /F, so the server's own shutdown path never
+        // runs and the addresses it published would outlive it until they went
+        // stale. `tethera pair` reads that record to decide whether anything is
+        // listening, and a stale answer there is a code typed into a screen
+        // nothing is behind.
+        MachineAddress::clear(&config);
 
         println!("stopped tethera server, pid {pid}");
 
@@ -43,9 +88,10 @@ impl Config {
     // than delivered.
     #[cfg(windows)]
     fn signal(pid: u32) -> anyhow::Result<()> {
-        let output = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output()?;
+        let mut command = std::process::Command::new("taskkill");
+        command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+
+        let output = crate::process::Windowless::apply(&mut command).output()?;
 
         if !output.status.success() {
             return Err(anyhow!(

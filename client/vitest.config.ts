@@ -11,6 +11,8 @@ export default defineConfig({
     alias: {
       $console: fileURLToPath(new URL("./src/console", import.meta.url)),
       $bindings: fileURLToPath(new URL("./src/js/bindings", import.meta.url)),
+      $managers: fileURLToPath(new URL("./src/js/app", import.meta.url)),
+      $components: fileURLToPath(new URL("./src/js/components", import.meta.url)),
       $lib: fileURLToPath(new URL("./src/lib", import.meta.url)),
     },
     // Without this Svelte resolves to its server build and mount() throws:

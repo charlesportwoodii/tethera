@@ -20,6 +20,8 @@
     settings: ["M10 3v2M10 15v2M4 6.6l1.8 1M14.2 12.4l1.8 1M4 13.4l1.8-1M14.2 7.6l1.8-1"],
     retry: ["M16 10a6 6 0 1 1-1.8-4.3", "M16 3.5V7h-3.5"],
     download: ["M10 3.5v9M6 9l4 4 4-4M3.5 16.5h13"],
+    check: ["M4.5 10.5l3.5 3.5 7.5-8"],
+    close: ["M5.5 5.5l9 9M14.5 5.5l-9 9"],
   };
 
   const paths = $derived(PATHS[name] ?? []);

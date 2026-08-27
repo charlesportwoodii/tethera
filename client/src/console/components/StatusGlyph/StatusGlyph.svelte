@@ -9,6 +9,7 @@
     idle: "Idle",
     done: "Done",
     blocked: "Waiting on you",
+    stalled: "Working, but stalled",
     offline: "Not answering",
     set: "Chosen",
     unset: "Not chosen",

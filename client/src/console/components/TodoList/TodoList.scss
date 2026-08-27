@@ -1,0 +1,62 @@
+.tc-todo {
+  border-radius: var(--tc-r-chip);
+  overflow: hidden;
+  background: var(--tc-surface-2);
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    font-family: var(--tc-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tc-ink-2);
+  }
+
+  &__count {
+    margin-left: auto;
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    color: var(--tc-ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__item {
+    display: flex;
+    gap: 9px;
+    align-items: center;
+    padding: 7px 10px;
+    font-size: 12.5px;
+    color: var(--tc-ink-2);
+  }
+
+  // The same three marks as everywhere else: filled disc done, working ring
+  // current, hollow ring not yet.
+  &__mark {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    border-radius: 50%;
+    border: 1.5px solid var(--tc-rule-2);
+  }
+
+  &__item.is-done {
+    color: var(--tc-ink-3);
+
+    .tc-todo__mark {
+      background: var(--tc-ok);
+      border-color: var(--tc-ok);
+    }
+  }
+
+  &__item.is-in_progress {
+    color: var(--tc-ink);
+    font-weight: 600;
+
+    .tc-todo__mark {
+      border-color: var(--tc-working);
+      background: color-mix(in srgb, var(--tc-working) 22%, transparent);
+    }
+  }
+}

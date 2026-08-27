@@ -9,6 +9,11 @@ pub struct Model {
     pub code_hash: String,
     pub expires_at: i64,
     pub consumed_at: Option<i64>,
+    // The window's own budget, so redialling cannot reset it. The dispatcher
+    // retries per connection, and a counter that lived there would make
+    // attempts_left a number the server says rather than one it enforces.
+    pub attempts_left: i32,
+    pub code_length: i32,
     pub created_at: i64,
     pub updated_at: i64,
 }

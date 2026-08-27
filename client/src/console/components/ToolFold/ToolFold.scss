@@ -28,7 +28,13 @@
 
   &__detail {
     color: var(--tc-ink-3);
-    flex: none;
+    // Shrinkable, not fixed: a long command otherwise runs past the fold's own
+    // max-width and off the edge of the screen with nothing to show it was cut.
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     &.is-ok {
       color: var(--tc-ok);
@@ -36,6 +42,10 @@
 
     &.is-attn {
       color: var(--tc-attn);
+    }
+
+    &.is-run {
+      color: var(--tc-working);
     }
   }
 
@@ -45,5 +55,10 @@
 
   &.is-expanded :global(.tc-icon) {
     transform: rotate(90deg);
+  }
+
+  // A failed tool is the one fold worth finding without reading it.
+  &[data-status="failed"] {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc-attn) 40%, transparent);
   }
 }
