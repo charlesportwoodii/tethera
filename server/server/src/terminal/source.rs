@@ -14,6 +14,15 @@
 pub enum PaneSource {
     /// The pane publishes its own bytes and this process owns the far end.
     Streamed,
+    /// The program's own bytes, relayed by a shim in a pane another process owns.
+    ///
+    /// As faithful as `Streamed` — these are the real bytes, in order — and
+    /// different in exactly one way: this process is not the terminal. The shim
+    /// is, because the pane it sits in has a ConPTY that will not start a child
+    /// until somebody answers its cursor query, and the shim is the only thing
+    /// positioned to answer. So the emulator here reads the stream and must not
+    /// reply to it.
+    Relayed,
     /// The pane's screen is polled and the difference between two reads replayed.
     Sampled,
 }
@@ -21,6 +30,17 @@ pub enum PaneSource {
 impl PaneSource {
     /// Whether a frame from this source may carry a cursor.
     pub fn observes_cursor(self) -> bool {
+        matches!(self, Self::Streamed | Self::Relayed)
+    }
+
+    /// Whether this process answers the pane's device queries.
+    ///
+    /// Exactly one thing may answer a `DSR` or a `DA`. For a pty this process
+    /// opened, that is this process. For a relayed pane it is the shim, which
+    /// has already replied by the time the bytes arrive here — so replying again
+    /// sends a second answer down the same pipe, and the shell receives a
+    /// literal `[1;1R` as though somebody had typed it.
+    pub fn answers_queries(self) -> bool {
         matches!(self, Self::Streamed)
     }
 }

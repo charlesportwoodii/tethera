@@ -81,6 +81,16 @@ tauri-plugin-curia = { git = "https://github.com/charlesportwoodii/tauri-plugin-
 vte = { version = "^0.15" }
 unicode-width = { version = "^0.2" }
 portable-pty = { version = "^0.9" }
+# Raw mode and terminal size for the shim, which is the one place tethera is
+# *inside* somebody else's terminal rather than owning one. Both are per-platform
+# console calls — termios on unix, SetConsoleMode and
+# GetConsoleScreenBufferInfo on Windows — and this is the smallest crate that
+# covers both without hand-writing the Windows half.
+#
+# Default features, deliberately. `windows` is one of them and is not optional on
+# Windows — crossterm refuses to compile without it, naming the feature but not
+# the fact that turning defaults off is what removed it.
+crossterm = { version = "^0.29" }
 
 [profile.release]
 opt-level = 3

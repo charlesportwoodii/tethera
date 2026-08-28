@@ -85,10 +85,10 @@ impl HerdrBackend {
         let body: wire::SnapshotBody = self.herdr.run_json(&["api", "snapshot"])?;
         let snapshot = body.snapshot;
 
-        if snapshot.protocol != Snapshot::KNOWN_PROTOCOL {
+        if !snapshot.speaks_known_protocol() {
             tracing::warn!(
                 herdr_protocol = snapshot.protocol,
-                known = Snapshot::KNOWN_PROTOCOL,
+                known = ?Snapshot::KNOWN_PROTOCOLS,
                 herdr_version = %snapshot.version,
                 "herdr speaks a protocol this backend was not written against"
             );

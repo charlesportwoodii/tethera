@@ -6,6 +6,7 @@ pub mod agent;
 pub mod device;
 pub mod pair;
 pub mod server;
+pub mod shim;
 
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum SubCommand {
@@ -17,6 +18,9 @@ pub enum SubCommand {
     Pair(pair::Config),
     /// Inspect and start agents
     Agent(agent::Config),
+    /// Run a shell inside a pty and copy it both ways, so a pane this process
+    /// does not own still has a readable byte stream
+    Shim(shim::Config),
 }
 
 #[derive(Debug, Parser, Clone)]
@@ -67,6 +71,7 @@ impl Cli {
             SubCommand::Device(command) => command.run(config).await,
             SubCommand::Pair(command) => command.run(config).await,
             SubCommand::Agent(command) => command.run(config).await,
+            SubCommand::Shim(command) => command.run(config).await,
         };
 
         if let Err(error) = result {

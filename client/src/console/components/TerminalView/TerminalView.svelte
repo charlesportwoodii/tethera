@@ -25,6 +25,7 @@
     exited: "The program exited.",
     pane_gone: "The pane is gone.",
     server_shutdown: "The machine stopped answering.",
+    disconnected: "Lost the stream for this pane. It is probably still running.",
   };
 </script>
 

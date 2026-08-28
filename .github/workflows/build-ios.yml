@@ -124,14 +124,82 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security list-keychain -d user -s "$KEYCHAIN"
 
+          # Decoded once and kept: the verification step below reads the same
+          # plist rather than shelling out to `security cms` a second time.
+          security cms -D -i "$PROFILE" > "$RUNNER_TEMP/profile.plist"
+
           # Xcode finds an installed profile by its UUID and by nothing else, so
           # the file has to be named for the UUID inside it.
-          UUID="$(/usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin <<< "$(security cms -D -i "$PROFILE")")"
+          UUID="$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/profile.plist")"
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp "$PROFILE" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
 
           echo "profile_uuid=$UUID" >> "$GITHUB_OUTPUT"
+
+      # Checked here rather than left to xcodebuild. Both mismatches below are
+      # properties of the two secrets and are knowable in a second; xcodebuild
+      # finds them forty seconds into a compile and reports them as two separate
+      # errors against the .xcodeproj, which reads as a problem with the
+      # generated project rather than with a secret holding the wrong file.
+      - name: Verify the signing material matches this app
+        run: |
+          set -eu
+
+          PLIST="$RUNNER_TEMP/profile.plist"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+
+          PROFILE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PLIST")"
+          # application-identifier is "<TEAMID>.<bundle id>"; drop the prefix.
+          APP_ID="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PLIST")"
+          PROFILE_APP="${APP_ID#*.}"
+          WANTED_APP="$(node -p "require('./client/src-tauri/tauri.conf.json').identifier")"
+
+          echo "profile      : $PROFILE_NAME"
+          echo "profile app  : $PROFILE_APP"
+          echo "this app     : $WANTED_APP"
+
+          if [ "$PROFILE_APP" != "$WANTED_APP" ]; then
+            echo ""
+            echo "ERROR: IOS_PROVISIONING_PROFILE_BASE64 holds a profile for a different app."
+            echo ""
+            echo "  Create an App Store profile for $WANTED_APP at"
+            echo "    https://developer.apple.com/account/resources/profiles"
+            echo "  and select the Apple Distribution certificate whose .p12 is in"
+            echo "  APPLE_CERTIFICATE_BASE64. Then replace the secret with:"
+            echo "    base64 -i <name>.mobileprovision | pbcopy"
+            exit 1
+          fi
+
+          # A profile embeds the certificates it will sign with. A certificate
+          # made after the profile is not in it, and that is its own error.
+          CERTS=""
+          i=0
+          while raw="$(plutil -extract "DeveloperCertificates.$i" raw -o - "$PLIST" 2>/dev/null)"; do
+            printf '%s' "$raw" | base64 -d > "$RUNNER_TEMP/profile-cert.der"
+            CERTS="$CERTS $(openssl x509 -inform DER -in "$RUNNER_TEMP/profile-cert.der" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"
+            i=$((i + 1))
+          done
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | awk 'NR==1 { print $2 }')"
+
+          echo "profile holds $i certificate(s)"
+          echo "keychain identity: $IDENTITY"
+
+          case "$CERTS" in
+            *"$IDENTITY"*)
+              echo "ok the profile includes the certificate that was imported"
+              ;;
+            *)
+              echo ""
+              echo "ERROR: the profile does not include the certificate in APPLE_CERTIFICATE_BASE64."
+              echo ""
+              echo "  A profile embeds the certificates it may sign with, so one generated"
+              echo "  before that certificate existed will never include it. Regenerate the"
+              echo "  profile with the certificate selected, then update the secret."
+              exit 1
+              ;;
+          esac
 
       # After init, which writes a project set to Automatic signing.
       - name: Switch the project to manual signing

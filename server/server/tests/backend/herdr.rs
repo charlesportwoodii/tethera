@@ -2,9 +2,10 @@
 //!
 //! Everything here is a pure function over a string, so none of it needs herdr
 //! installed. The fixtures under `tests/fixtures/herdr/` were captured from
-//! `herdr 0.8.0-preview.2026-08-04-d78e3d3b5126`, socket API protocol 19, on a
-//! real session; the hand-authored ones are named for the hostile case they
-//! carry.
+//! `herdr 0.8.0-preview.2026-08-04-d78e3d3b5126`, socket API protocol 19, and
+//! from `herdr 0.8.2`, protocol 20, on real sessions; the hand-authored ones
+//! are named for the hostile case they carry. Paths, labels and session ids in
+//! the protocol 20 capture are rewritten.
 
 use std::collections::BTreeMap;
 
@@ -82,6 +83,62 @@ fn the_snapshot_answer_nests_its_payload_under_a_result_body() {
     assert_eq!(snapshot.tabs.len(), 7);
     assert_eq!(snapshot.panes.len(), 7);
     assert_eq!(snapshot.layouts.len(), 7);
+}
+
+#[test]
+fn both_protocols_in_the_field_decode_and_are_known() {
+    let old = Fixture::snapshot("snapshot.json");
+    let new = Fixture::snapshot("snapshot-20.json");
+
+    assert_eq!(old.protocol, 19);
+    assert_eq!(new.protocol, 20);
+    assert!(old.speaks_known_protocol());
+    assert!(new.speaks_known_protocol());
+
+    let ahead = Snapshot {
+        protocol: 21,
+        ..new
+    };
+
+    assert!(!ahead.speaks_known_protocol());
+}
+
+#[test]
+fn a_protocol_20_session_maps_to_the_tree_it_actually_had() {
+    let snapshot = Fixture::snapshot("snapshot-20.json");
+    let foreground = Fixture::empty_foreground();
+
+    let workspaces = Mapping::workspaces(&snapshot);
+    let ids: Vec<&str> = workspaces.iter().map(|w| w.id.as_str()).collect();
+
+    assert_eq!(ids, vec!["ws_w1M", "ws_w1N"]);
+
+    let panes = Mapping::panes(&snapshot, Some("w1M:t1"), &foreground, Fixture::DEFAULT);
+
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0].id.as_str(), "pn_w1M:p1");
+    assert_eq!(panes[0].size, Size { cols: 114, rows: 49 });
+    assert_eq!(
+        panes[0].title.as_deref(),
+        Some("Herdr protocol 20 alignment")
+    );
+}
+
+// The protocol 19 capture has no announced session on any pane, so the bound
+// case was only ever read from a hand-authored fixture until this one.
+#[test]
+fn a_protocol_20_pane_carries_the_session_its_agent_announced() {
+    let snapshot = Fixture::snapshot("snapshot-20.json");
+    let panes = Mapping::panes(&snapshot, None, &Fixture::empty_foreground(), Fixture::DEFAULT);
+
+    assert!(panes.iter().all(|pane| pane.agent.is_some()));
+    assert_eq!(
+        panes
+            .iter()
+            .filter_map(|pane| pane.conversation.as_ref())
+            .count(),
+        panes.len()
+    );
 }
 
 #[test]

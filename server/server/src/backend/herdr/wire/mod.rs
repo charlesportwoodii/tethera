@@ -87,13 +87,20 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// The protocol this backend's field expectations were written against.
+    /// The protocols this backend's field expectations were written against.
+    ///
+    /// Both are in the field at once: a herdr preview still speaks 19 where a
+    /// current release speaks 20, and the two differ in nothing read here.
     ///
     /// Recorded rather than enforced. Every field the mapping reads is
     /// required, so a removal already fails loudly at the parse; refusing a
     /// whole session over a version bump that only added a field would take the
     /// product down for no gain.
-    pub const KNOWN_PROTOCOL: u32 = 19;
+    pub const KNOWN_PROTOCOLS: &'static [u32] = &[19, 20];
+
+    pub fn speaks_known_protocol(&self) -> bool {
+        Self::KNOWN_PROTOCOLS.contains(&self.protocol)
+    }
 
     pub fn layout_of_tab(&self, tab_id: &str) -> Option<&PaneLayout> {
         self.layouts.iter().find(|layout| layout.tab_id == tab_id)

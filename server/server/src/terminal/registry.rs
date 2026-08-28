@@ -256,7 +256,7 @@ impl PaneRegistry {
         // own pump before it was ever in the map.
         self.live().insert(pane.clone(), shared.clone());
 
-        Self::spawn_pump(pane, shared, Arc::downgrade(&self.live), io.events, io.input);
+        Self::spawn_pump(pane, shared, Arc::downgrade(&self.live), io.events, io.input, source);
     }
 
     /// Whether this registry is emulating the named pane.
@@ -384,6 +384,7 @@ impl PaneRegistry {
         live: Weak<Mutex<HashMap<PaneId, Arc<PaneEmulator>>>>,
         mut events: mpsc::Receiver<PaneEvent>,
         input: mpsc::Sender<Vec<u8>>,
+        source: PaneSource,
     ) {
         tokio::spawn(async move {
             loop {
@@ -393,7 +394,16 @@ impl PaneRegistry {
                             let mut state = shared.state();
                             state.emulator.feed(&bytes);
 
-                            state.emulator.take_replies()
+                            // Taken either way, so an unanswered query cannot
+                            // accumulate in the emulator for the life of a
+                            // relayed pane.
+                            let replies = state.emulator.take_replies();
+
+                            if source.answers_queries() {
+                                replies
+                            } else {
+                                Vec::new()
+                            }
                         };
 
                         // A program that asks for its cursor position and is

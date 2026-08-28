@@ -88,6 +88,16 @@ pub enum CloseReason {
     PaneGone,
     /// The server stopped serving this attach.
     ServerShutdown,
+    /// The channel carrying this pane ended, but the pane itself may not have.
+    ///
+    /// A relayed pane's stream belongs to a shim, and a shim can die, be
+    /// upgraded, or lose its channel while herdr keeps the pane and the shell
+    /// running. Saying `Exited` there would tell somebody their work is gone
+    /// when it is still on screen at the desk.
+    ///
+    /// Added last on purpose: postcard encodes a variant by index, so a variant
+    /// inserted above this line would silently renumber every one below it.
+    Disconnected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
