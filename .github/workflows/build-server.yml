@@ -1,11 +1,30 @@
 name: Build server
 
-# Inert on purpose. workflow_call is what build-all.yml needs to fan out to
-# this workflow; neither trigger fires on its own. Add `push:` and
-# `pull_request:` here to enable.
+# Inert on purpose. workflow_call is what build-all.yml and release.yml need to
+# fan out to this workflow; neither trigger fires on its own.
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Cargo profile (debug or release)'
+        required: false
+        default: debug
+        type: string
+      ref:
+        description: 'Git ref to check out (tag, branch, or SHA)'
+        required: false
+        default: ''
+        type: string
   workflow_call:
+    inputs:
+      profile:
+        required: false
+        default: debug
+        type: string
+      ref:
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build:
@@ -15,38 +34,24 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          # Statically linked, so the binary runs on a distribution older than
-          # the runner's glibc and inside a distroless or Alpine image.
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-          # On the arm runner rather than cross-compiled from x86_64: musl-gcc
-          # from `musl-tools` targets the host architecture only.
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
           - os: macos-latest
             target: aarch64-apple-darwin
-          # macos-latest is arm64. The x86_64 slice cross-compiles on it with no
-          # extra linker, because the macOS SDK carries both architectures.
-          - os: macos-latest
-            target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     env:
-      # `mise run build-server` is a bare `cargo build` with no `--target`, so
-      # the triple reaches cargo through the environment rather than by forking
-      # the task. Every entry sets it, including the ones that were already
-      # native: it moves the output under `target/<triple>/`, and a path that
-      # was right for some entries and wrong for others is the harder bug.
       CARGO_BUILD_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
-      # The Rust std for a musl target is a rustup component, but the linker is
-      # not. libsqlite3-sys also compiles bundled SQLite through `cc`, which
-      # finds musl-gcc by name.
       - name: Install musl toolchain
         if: endsWith(matrix.target, '-musl')
         run: |
@@ -58,15 +63,15 @@ jobs:
           target: ${{ matrix.target }}
 
       - run: mise trust --all
-      - run: mise run build-server
+
+      # mise appends trailing arguments to a task with no usage spec, so this
+      # reaches cargo as `cargo build --release`.
+      - run: mise run build-server ${{ inputs.profile == 'release' && '--release' || '' }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tethera-${{ matrix.target }}
+          name: tethera-server-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/debug/tethera
-            target/${{ matrix.target }}/debug/tethera.exe
-          # `warn` is how a build that produced nothing reported success. Every
-          # entry here is expected to yield a binary, so an absent one is a
-          # failure and not a note in the log.
+            target/${{ matrix.target }}/${{ inputs.profile }}/tethera
+            target/${{ matrix.target }}/${{ inputs.profile }}/tethera.exe
           if-no-files-found: error

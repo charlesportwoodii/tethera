@@ -5,13 +5,67 @@ name: Build Android
 # `pull_request:` here to enable.
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to check out (tag, branch, or SHA)'
+        required: false
+        default: ''
+        type: string
+      version:
+        description: 'Version to patch into the config files before building'
+        required: false
+        default: ''
+        type: string
+      build_number:
+        description: 'Atomic build number, used as versionCode'
+        required: false
+        default: ''
+        type: string
+      play_store_track:
+        description: 'Play track (internal/alpha/beta/production). Empty means no upload.'
+        required: false
+        default: ''
+        type: string
   workflow_call:
+    inputs:
+      ref:
+        required: false
+        default: ''
+        type: string
+      version:
+        required: false
+        default: ''
+        type: string
+      build_number:
+        required: false
+        default: ''
+        type: string
+      play_store_track:
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # semantic-release has already patched these files on the release commit.
+      # This is for a dispatch against an unpatched ref, so a manual build still
+      # carries the version and versionCode it will be uploaded under.
+      - name: Patch version
+        if: inputs.version != ''
+        run: node .github/scripts/patch-versions.js "${{ inputs.version }}"
+
+      # After the version patch, which writes its own versionCode. The build
+      # number is the authority: it is the only value guaranteed to increase,
+      # and Play rejects a versionCode it has already seen.
+      - name: Apply build number
+        if: inputs.build_number != ''
+        run: node .github/scripts/set-build-number.js "${{ inputs.build_number }}"
 
       # Java 21, not a later version — the Android Gradle Plugin pins it.
       - uses: actions/setup-java@v4
@@ -56,34 +110,13 @@ jobs:
       # and never committed, so CI has to make one before it can build one.
       # Without this the build fails with "Android Studio project directory
       # doesn't exist".
+      #
+      # The package script, not a bare `tauri android init`: init also has to be
+      # followed by the overlay copy, and a local build and a CI build that
+      # differ in that step produce different apps.
       - name: Initialise the Android project
         working-directory: client
-        run: yarn tauri android init
-
-      # After init, because init rewrites app/build.gradle.kts.
-      - name: Configure release signing
-        working-directory: client
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-        run: |
-          set -eu
-
-          KEYSTORE="$RUNNER_TEMP/upload-keystore.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
-
-          # An absolute path, because `file(...)` in app/build.gradle.kts
-          # resolves a relative one against app/ while the properties file it
-          # came from sits a directory above.
-          {
-            echo "storeFile=$KEYSTORE"
-            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
-            echo "keyAlias=$ANDROID_KEY_ALIAS"
-            echo "keyPassword=$ANDROID_KEYSTORE_PASSWORD"
-          } > src-tauri/gen/android/keystore.properties
-
-          cat ../.github/android/signing.gradle.kts >> src-tauri/gen/android/app/build.gradle.kts
+        run: yarn tauri:android:init
 
       # tauri.conf.json's beforeBuildCommand builds the SvelteKit frontend, so
       # there is no separate frontend step here.
@@ -111,35 +144,80 @@ jobs:
           export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           yarn tauri android build --apk --aab --target aarch64 --target armv7
 
-      - name: Collect and verify the artifacts
+      - name: Locate the build outputs
+        id: outputs
         working-directory: client
         run: |
-          set -eu
-
-          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
           OUTPUTS=src-tauri/gen/android/app/build/outputs
+          APK="$OUTPUTS/apk/universal/release/app-universal-release-unsigned.apk"
+          AAB="$OUTPUTS/bundle/universalRelease/app-universal-release.aab"
 
-          APK="$(find "$OUTPUTS/apk" -name '*release*.apk' -type f | sort | head -1 || true)"
-          AAB="$(find "$OUTPUTS/bundle" -name '*release*.aab' -type f | sort | head -1 || true)"
-
-          if [ -z "$APK" ] || [ -z "$AAB" ]; then
-            echo "FAIL the build reported success but did not write both an APK and an AAB."
-            find "$OUTPUTS" -type f || true
+          if [ ! -f "$APK" ] || [ ! -f "$AAB" ]; then
+            echo "ERROR: the build reported success but did not write both an APK and an AAB."
+            echo "  expected APK: $APK"
+            echo "  expected AAB: $AAB"
+            find "$OUTPUTS" -type f \( -name '*.apk' -o -name '*.aab' \) 2>/dev/null || echo "nothing found"
             exit 1
           fi
 
-          cp "$APK" tethera-android-release.apk
-          cp "$AAB" tethera-android-release.aab
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "aab=$AAB" >> "$GITHUB_OUTPUT"
 
-          # Verified rather than assumed. A signingConfig that failed to load
-          # leaves Gradle emitting an unsigned release artifact and reporting
-          # success, and Play refuses it hours later.
-          "$BUILD_TOOLS/apksigner" verify --verbose tethera-android-release.apk
+      - name: Sign the APK
+        working-directory: client
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          echo "Using build tools at $BUILD_TOOLS"
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > upload-keystore.jks
 
           # -P 16, not -p. -p aligns .so entries to 4 KB, which a device with 16
           # KB memory pages cannot map, so the install fails on hardware the
           # build gave no sign of excluding.
-          "$BUILD_TOOLS/zipalign" -c -P 16 4 tethera-android-release.apk
+          "$BUILD_TOOLS/zipalign" -v -P 16 4 \
+            "${{ steps.outputs.outputs.apk }}" \
+            tethera-android-release-aligned.apk
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks upload-keystore.jks \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --out tethera-android-release.apk \
+            tethera-android-release-aligned.apk
+
+          "$BUILD_TOOLS/apksigner" verify --verbose tethera-android-release.apk
+
+          if ! "$BUILD_TOOLS/zipalign" -c -P 16 4 tethera-android-release.apk; then
+            echo "ERROR: tethera-android-release.apk is not 16 KB aligned. Sideloaded installs fail on devices with 16 KB memory pages."
+            exit 1
+          fi
+
+          ls -la tethera-android-release.apk
+
+      - name: Sign the AAB
+        working-directory: client
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          cp "${{ steps.outputs.outputs.aab }}" tethera-android-release.aab
+
+          jarsigner -verbose \
+            -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore upload-keystore.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -keypass "$ANDROID_KEYSTORE_PASSWORD" \
+            tethera-android-release.aab \
+            "$ANDROID_KEY_ALIAS"
+
+          jarsigner -verify -verbose tethera-android-release.aab
+
+          ls -la tethera-android-release.aab
 
       - uses: actions/upload-artifact@v4
         with:
@@ -155,12 +233,22 @@ jobs:
           path: client/tethera-android-release.aab
           if-no-files-found: error
 
-      # A signing key and its password on a shared runner's disk. Removed
-      # unconditionally, because a failed build is exactly when they are still
-      # sitting there.
-      - name: Remove the signing material
+      # Play takes the AAB. `status` is `draft` for production so a release to
+      # everybody is never one workflow run away from being live; a testing
+      # track completes on its own.
+      - name: Upload to Google Play
+        if: inputs.play_store_track != ''
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.alaydriem.tethera
+          releaseFiles: client/tethera-android-release.aab
+          track: ${{ inputs.play_store_track }}
+          status: ${{ inputs.play_store_track == 'production' && 'draft' || 'completed' }}
+
+      # A signing key on a shared runner's disk. Removed unconditionally,
+      # because a failed build is exactly when it is still sitting there.
+      - name: Remove the keystore
         if: always()
         working-directory: client
-        run: |
-          rm -f "$RUNNER_TEMP/upload-keystore.jks"
-          rm -f src-tauri/gen/android/keystore.properties
+        run: rm -f upload-keystore.jks

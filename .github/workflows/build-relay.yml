@@ -1,11 +1,30 @@
 name: Build relay
 
-# Inert on purpose. workflow_call is what build-all.yml needs to fan out to
-# this workflow; neither trigger fires on its own. Add `push:` and
-# `pull_request:` here to enable.
+# Inert on purpose. workflow_call is what build-all.yml and release.yml need to
+# fan out to this workflow; neither trigger fires on its own.
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Cargo profile (debug or release)'
+        required: false
+        default: debug
+        type: string
+      ref:
+        description: 'Git ref to check out (tag, branch, or SHA)'
+        required: false
+        default: ''
+        type: string
   workflow_call:
+    inputs:
+      profile:
+        required: false
+        default: debug
+        type: string
+      ref:
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build:
@@ -23,11 +42,11 @@ jobs:
             target: aarch64-unknown-linux-musl
     runs-on: ${{ matrix.os }}
     env:
-      # See build-server.yml: the mise task is a bare `cargo build -p`, so the
-      # triple is handed to cargo through the environment.
       CARGO_BUILD_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Install musl toolchain
         if: endsWith(matrix.target, '-musl')
@@ -40,20 +59,23 @@ jobs:
           target: ${{ matrix.target }}
 
       - run: mise trust --all
-      - run: mise run build-relay
+      - run: mise run build-relay ${{ inputs.profile == 'release' && '--release' || '' }}
 
-      # The relay is a thing somebody deploys onto a host they do not build on,
-      # so the binary is the point of the job. It was being built and discarded.
+      # The relay is deployed onto a host nobody builds on, so the binary is the
+      # point of the job. It was being built and discarded.
       - uses: actions/upload-artifact@v4
         with:
           name: tethera-relay-${{ matrix.target }}
-          path: target/${{ matrix.target }}/debug/tethera-relay
+          path: target/${{ matrix.target }}/${{ inputs.profile }}/tethera-relay
           if-no-files-found: error
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
       - name: Build relay image
         run: docker build -f relay/Dockerfile .
 

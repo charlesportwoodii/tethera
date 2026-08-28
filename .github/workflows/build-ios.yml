@@ -9,13 +9,67 @@ name: Build iOS
 # Windows runners used elsewhere in this repo's CI.
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to check out (tag, branch, or SHA)'
+        required: false
+        default: ''
+        type: string
+      version:
+        description: 'Version to patch into the config files before building'
+        required: false
+        default: ''
+        type: string
+      build_number:
+        description: 'Atomic build number, used as CFBundleVersion'
+        required: false
+        default: ''
+        type: string
+      testflight_upload:
+        description: 'Upload the IPA to TestFlight'
+        required: false
+        default: false
+        type: boolean
   workflow_call:
+    inputs:
+      ref:
+        required: false
+        default: ''
+        type: string
+      version:
+        required: false
+        default: ''
+        type: string
+      build_number:
+        required: false
+        default: ''
+        type: string
+      testflight_upload:
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Both patches run before `tauri ios init`, because the init script reads
+      # tauri.conf.json to write the generated Info.plist. Patching afterwards
+      # would leave the built app on the version it was generated with.
+      - name: Patch version
+        if: inputs.version != ''
+        run: node .github/scripts/patch-versions.js "${{ inputs.version }}"
+
+      # After the version patch, which writes its own CFBundleVersion. The build
+      # number is the authority: App Store Connect refuses a CFBundleVersion it
+      # has already accepted for this CFBundleShortVersionString.
+      - name: Apply build number
+        if: inputs.build_number != ''
+        run: node .github/scripts/set-build-number.js "${{ inputs.build_number }}"
 
       - uses: ./.github/actions/setup-rust
         with:
@@ -33,9 +87,13 @@ jobs:
       # and never committed, so CI has to make one before it can build one.
       # Without this the build fails with "Xcode project directory doesn't
       # exist".
+      #
+      # The package script, not a bare `tauri ios init`: it also installs
+      # Info.ios.plist over the generated Info.plist, writes the version numbers
+      # into it and re-applies the entitlements, none of which survive init.
       - name: Initialise the Xcode project
         working-directory: client
-        run: yarn tauri ios init
+        run: yarn tauri:ios:init
 
       - name: Install the signing certificate and provisioning profile
         id: signing
@@ -125,6 +183,17 @@ jobs:
           name: tethera-ios-release-ipa
           path: client/tethera-ios-release.ipa
           if-no-files-found: error
+
+      # The API key, not an Apple ID: an app-specific password needs a human to
+      # have made one and does not survive two-factor changes.
+      - name: Upload to TestFlight
+        if: inputs.testflight_upload
+        uses: apple-actions/upload-testflight-build@v3
+        with:
+          app-path: client/tethera-ios-release.ipa
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
 
       # A distribution identity and a provisioning profile on a shared runner.
       # Removed unconditionally, because a failed build is exactly when they are

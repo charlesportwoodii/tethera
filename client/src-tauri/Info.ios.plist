@@ -2,16 +2,60 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<!-- Both version keys are rewritten by .github/scripts/patch-versions.js and
+	     patch-apple-plists.js. The literals here are only what a local build
+	     without those scripts reports. -->
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<!-- The pairing QR encodes a tethera:// URI, and the deep-link plugin needs
+	     the scheme declared here as well as in tauri.conf.json. Declared in one
+	     place only, the phone opens nothing when the code is tapped. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tethera</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>tethera</string>
+		</dict>
+	</array>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<!-- Without this the barcode scanner fails at run time rather than at build
 	     time, and the message names neither the key nor the plugin. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Read the pairing code shown by your machine</string>
-
-	<!-- The identity key lives in the Keychain. Without the entitlement the
-	     store is unavailable and the app cannot mint or read its own identity. -->
-	<key>keychain-access-groups</key>
+	<!-- iroh prefers a direct path, which on a phone means talking to a machine
+	     on the same network. iOS 14 and later refuses those connections without
+	     this key and the consent prompt it produces, and the failure looks like
+	     the relay being the only route that ever works. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect directly to your own machine when it is on the same network, instead of going through a relay</string>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>$(AppIdentifierPrefix)</string>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
 	</array>
 </dict>
 </plist>

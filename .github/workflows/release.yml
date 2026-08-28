@@ -1,0 +1,320 @@
+name: Create Release
+
+# A push to master is the release trigger. semantic-release decides whether the
+# commits since the last tag warrant one; when they do not, `new_release` is
+# false and every job below skips. That is why this can fire on every merge
+# without releasing on every merge.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: build everything, publish nothing'
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: 'Create the GitHub release as a draft (the tag is still made)'
+        required: false
+        default: false
+        type: boolean
+      play_store_track:
+        description: 'Play track to upload to. Empty means no Play upload.'
+        required: false
+        default: beta
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: read
+
+# Never two at once. The build number is atomic on its own, but two releases in
+# flight would interleave their tags and their store uploads, and the second
+# would be uploading artifacts built from the first one's tree.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  prepare-release:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.semantic.outputs.new_release_published }}
+      new_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+      build_number: ${{ steps.build-number.outputs.build_number }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # semantic-release reads the whole history to find the last tag and
+          # every commit since. A shallow clone makes it believe the first
+          # release is always the next one.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure a draft release
+        if: inputs.draft == true
+        run: |
+          node -e "
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('.releaserc.json', 'utf8'));
+            config.plugins = config.plugins.map((plugin) => {
+              if (Array.isArray(plugin) && plugin[0] === '@semantic-release/github') {
+                plugin[1] = { ...plugin[1], draftRelease: true };
+              } else if (plugin === '@semantic-release/github') {
+                return ['@semantic-release/github', { draftRelease: true }];
+              }
+              return plugin;
+            });
+            fs.writeFileSync('.releaserc.json', JSON.stringify(config, null, 2));
+            console.log('Release will be created as a draft');
+          "
+
+      # Held for the length of the release rather than the length of this job.
+      # The TTL is the backstop: a run that dies between here and `release-lock`
+      # must not wedge every later release.
+      - name: Acquire the release lock
+        uses: ./.github/actions/release-lock
+        with:
+          operation: acquire
+          redis_url: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          redis_token: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          ttl: '3600'
+
+      # GITHUB_TOKEN, not a PAT or a GitHub App. It can tag, push the release
+      # commit and create the release. If master ever gains a protection rule
+      # requiring a pull request, this push is refused and the token has to
+      # become an App installation token with a bypass.
+      - name: Run semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          dry_run: ${{ inputs.dry_run == true }}
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Atomic and monotonic, which is the only property that matters: Play and
+      # App Store Connect both refuse a build number they have already seen, and
+      # a counter derived from the run number resets when a workflow is renamed
+      # and repeats when a run is re-run.
+      #
+      # A key of its own, because this Redis instance is shared with other
+      # projects and a shared counter would make the numbers jump.
+      - name: Get the build number
+        id: build-number
+        if: steps.semantic.outputs.new_release_published == 'true'
+        uses: ./.github/actions/get-build-number
+        with:
+          redis_url: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          redis_token: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          key: tethera-build-number
+          # No gh-pages branch in this repository, so there is nowhere to
+          # publish builds.json to. Setting this true would fail the job trying.
+          record_ledger: 'false'
+          sha: ${{ github.sha }}
+          branch: ${{ github.ref_name }}
+          ref: ${{ github.ref }}
+          version: ${{ steps.semantic.outputs.new_release_version }}
+          track: ${{ inputs.play_store_track || 'beta' }}
+          run_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
+            {
+              echo "## Release v${{ steps.semantic.outputs.new_release_version }}"
+              echo ""
+              echo "| | |"
+              echo "| --- | --- |"
+              echo "| Tag | \`${{ steps.semantic.outputs.new_release_git_tag }}\` |"
+              echo "| Build number | ${{ steps.build-number.outputs.build_number }} |"
+              echo "| Dry run | ${{ inputs.dry_run == true }} |"
+              echo "| Draft | ${{ inputs.draft == true }} |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No release: nothing since the last tag warrants one." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Advisory. It reports at the release ref, and it does not gate the builds:
+  # the tag is already cut by the time this runs, so failing the release here
+  # would leave a tag with no artifacts behind it.
+  tests:
+    name: Tests
+    needs: prepare-release
+    if: needs.prepare-release.outputs.new_release == 'true'
+    uses: ./.github/workflows/tests.yml
+
+  build-server:
+    name: Build server
+    needs: prepare-release
+    if: needs.prepare-release.outputs.new_release == 'true'
+    uses: ./.github/workflows/build-server.yml
+    with:
+      profile: release
+      ref: ${{ needs.prepare-release.outputs.new_tag }}
+    secrets: inherit
+
+  build-relay:
+    name: Build relay
+    needs: prepare-release
+    if: needs.prepare-release.outputs.new_release == 'true'
+    uses: ./.github/workflows/build-relay.yml
+    with:
+      profile: release
+      ref: ${{ needs.prepare-release.outputs.new_tag }}
+    secrets: inherit
+
+  # The Play upload happens inside this workflow rather than after it, so the
+  # AAB that reaches the track is the one the job signed and never a re-download.
+  build-android:
+    name: Build Android
+    needs: prepare-release
+    if: needs.prepare-release.outputs.new_release == 'true'
+    uses: ./.github/workflows/build-android.yml
+    with:
+      ref: ${{ needs.prepare-release.outputs.new_tag }}
+      version: ${{ needs.prepare-release.outputs.new_version }}
+      build_number: ${{ needs.prepare-release.outputs.build_number }}
+      play_store_track: ${{ inputs.dry_run == true && '' || (inputs.play_store_track || 'beta') }}
+    secrets: inherit
+
+  build-ios:
+    name: Build iOS
+    needs: prepare-release
+    if: needs.prepare-release.outputs.new_release == 'true'
+    uses: ./.github/workflows/build-ios.yml
+    with:
+      ref: ${{ needs.prepare-release.outputs.new_tag }}
+      version: ${{ needs.prepare-release.outputs.new_version }}
+      build_number: ${{ needs.prepare-release.outputs.build_number }}
+      testflight_upload: ${{ inputs.dry_run != true }}
+    secrets: inherit
+
+  upload-assets:
+    name: Upload release assets
+    needs: [prepare-release, build-server, build-relay, build-android, build-ios]
+    # `always()` so a partial set still reaches the release. A release with the
+    # Linux binaries and no IPA is more useful than a release with nothing,
+    # and the missing one is visible in the asset list.
+    if: |
+      always() &&
+      needs.prepare-release.outputs.new_release == 'true' &&
+      inputs.dry_run != true &&
+      (needs.build-server.result == 'success' ||
+       needs.build-relay.result == 'success' ||
+       needs.build-android.result == 'success' ||
+       needs.build-ios.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare-release.outputs.new_tag }}
+
+      - name: Download the build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          pattern: tethera-*
+          merge-multiple: false
+
+      - name: List what arrived
+        run: find ./artifacts -type f -ls
+
+      - name: Assemble the release files
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.new_version }}
+        run: |
+          set -eu
+          mkdir -p release-files
+
+          # Renamed on the way out. An artifact name is a CI detail; an asset
+          # name is what somebody reads on the releases page before choosing
+          # which one to download.
+          take() {
+            src="$1"
+            dest="$2"
+
+            if [ -f "$src" ]; then
+              cp "$src" "release-files/$dest"
+              echo "  $dest"
+            else
+              echo "  (missing) $dest"
+            fi
+          }
+
+          echo "Server:"
+          take ./artifacts/tethera-server-x86_64-unknown-linux-musl/tethera      "tethera-server-linux-x64"
+          take ./artifacts/tethera-server-aarch64-unknown-linux-musl/tethera     "tethera-server-linux-arm64"
+          take ./artifacts/tethera-server-aarch64-apple-darwin/tethera           "tethera-server-macos-arm64"
+          take ./artifacts/tethera-server-x86_64-pc-windows-msvc/tethera.exe     "tethera-server-windows-x64.exe"
+
+          echo "Relay:"
+          take ./artifacts/tethera-relay-x86_64-unknown-linux-musl/tethera-relay  "tethera-relay-linux-x64"
+          take ./artifacts/tethera-relay-aarch64-unknown-linux-musl/tethera-relay "tethera-relay-linux-arm64"
+
+          echo "Client:"
+          take ./artifacts/tethera-android-release-apk/tethera-android-release.apk "tethera-android-${VERSION}.apk"
+          take ./artifacts/tethera-ios-release-ipa/tethera-ios-release.ipa         "tethera-ios-${VERSION}.ipa"
+
+          echo ""
+          echo "Assembled:"
+          ls -la release-files/
+
+          if [ -z "$(ls -A release-files)" ]; then
+            echo "ERROR: every artifact was missing. Nothing to attach."
+            exit 1
+          fi
+
+      - name: Attach them to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.new_tag }}
+          files: ./release-files/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          {
+            echo "## Assets on v${{ needs.prepare-release.outputs.new_version }}"
+            echo ""
+            for file in release-files/*; do
+              echo "- \`$(basename "$file")\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Always, and last. A lock left held blocks every later release until its TTL
+  # expires, so this runs even when a build above failed.
+  release-lock:
+    name: Release the lock
+    needs: [prepare-release, upload-assets]
+    if: always() && needs.prepare-release.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Release the lock
+        uses: ./.github/actions/release-lock
+        with:
+          operation: release
+          redis_url: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          redis_token: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}

@@ -3,7 +3,12 @@ name: Build all
 on:
   workflow_dispatch:
   pull_request:
+  # master is release.yml's trigger, and it fans out to these same workflows at
+  # the release tag. Without the exclusion every merge builds everything twice,
+  # and the two runs race for the same Play track.
   push:
+    branches-ignore:
+      - master
 
 jobs:
   changes:
