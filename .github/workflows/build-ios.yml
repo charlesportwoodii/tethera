@@ -90,7 +90,8 @@ jobs:
       #
       # The package script, not a bare `tauri ios init`: it also installs
       # Info.ios.plist over the generated Info.plist, writes the version numbers
-      # into it and re-applies the entitlements, none of which survive init.
+      # into it and adds the frameworks the Rust static library links against,
+      # none of which survive init.
       - name: Initialise the Xcode project
         working-directory: client
         run: yarn tauri:ios:init

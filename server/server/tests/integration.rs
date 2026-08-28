@@ -1,4 +1,5 @@
 mod backend;
+mod commands;
 mod config;
 mod machine;
 mod protocol;
