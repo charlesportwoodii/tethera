@@ -1,0 +1,29 @@
+
+ ▐▛███▛█   Claude Code v2.1.248
+▝▜██████▀  Opus 5 (1M context) with high effort · Claude Team
+  ▝▝ ▝▝    ~\projects\tethera
+
+  ⎿  SessionStart:startup hook error
+  ⎿  Failed with non-blocking status code: The argument
+     'C:/Users/charl/projects/tethera/gateway/hooks/tethera-pane-
+     index.ps1' is not recognized as the name of a script file.
+     Check the spelling of the name…
+
+❯ Call AskUserQuestion exactly once, with multiSelect true, and
+  nothing else at all: header "Triggers", question "Which
+  triggers should ship?", four options labelled Blocked, File,
+  Ping, Done, each with a one-line description. Do not read any
+  file. Do not use any other tool.
+
+─────────────────────────────────────────────────────────────────
+←  ☒ Triggers  ✔ Submit  →
+
+Review your answers
+
+ ● Which triggers should ship?
+   → File
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

@@ -1,6 +1,7 @@
 use crate::protocol::live::{BlockWatch, LiveTerminals, ResumeGate};
+use crate::paths::PathName;
 use crate::protocol::ports::{ConversationPort, TerminalPort};
-use crate::terminal::{Picker, PromptDetector};
+use crate::terminal::{PendingQuestion, Picker, PromptDetector};
 use crate::transcript::{
     AssetIndex, AssetNaming, SessionCatalog, StatusRule, TranscriptReader, TranscriptWatcher,
 };
@@ -365,12 +366,10 @@ impl LiveConversations {
             // Claude Code titles a session from its first turn, and there has
             // not been one. The directory is what a person would call it, and
             // the next listing replaces this with the agent's own title.
-            title: Some(
-                Path::new(&cwd)
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| cwd.clone()),
-            ),
+            title: Some(match PathName::basename(&cwd) {
+                "" => cwd.clone(),
+                name => name.to_string(),
+            }),
             preview: None,
             cwd,
             workspace: Some(pane.workspace_id.clone()),
@@ -407,7 +406,7 @@ impl LiveConversations {
     /// comparing to is what is true at this moment. The same source the watcher
     /// publishes from, so a set detected one way and answered against the other
     /// cannot refuse every answer as stale.
-    async fn pending_question(&self, id: &ConversationId) -> Result<Question, WireError> {
+    async fn pending_question(&self, id: &ConversationId) -> Result<PendingQuestion, WireError> {
         // A read that failed propagates as itself. Reported as `NotFound` it
         // would tell a person their question no longer exists — when what
         // actually happened is that this machine was busy for a moment — and the
@@ -461,7 +460,7 @@ impl LiveConversations {
 
             let unchanged = Self::detector()
                 .and_then(|detector| detector.detect(&screen))
-                .is_some_and(|still| still.fingerprint == answered.fingerprint);
+                .is_some_and(|still| still.question.fingerprint == answered.fingerprint);
 
             if !unchanged {
                 return Ok(());
@@ -989,10 +988,10 @@ impl ConversationPort for LiveConversations {
             })?;
 
         Ok(ConversationPreview {
-            workspace_label: std::path::Path::new(cwd)
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| cwd.to_string()),
+            workspace_label: match PathName::basename(cwd) {
+                "" => cwd.to_string(),
+                name => name.to_string(),
+            },
             tab_label: named.id.as_str().to_string(),
             creates_workspace: workspace.is_none(),
             // The pre-start counterpart of `has_transcript`, and the answer a
@@ -1265,23 +1264,27 @@ impl ConversationPort for LiveConversations {
             );
         })?;
 
-        if pending.id != *question || pending.fingerprint != *fingerprint {
+        if pending.question.id != *question || pending.question.fingerprint != *fingerprint {
             // Both halves named. A stale answer is either aimed at a question
             // that has since been replaced, or at the same question after its
             // text moved - and the two are different bugs entirely.
             tracing::info!(
                 conversation = id.as_str(),
                 sent_question = question.as_str(),
-                live_question = pending.id.as_str(),
-                same_question = pending.id == *question,
-                same_fingerprint = pending.fingerprint == *fingerprint,
+                live_question = pending.question.id.as_str(),
+                same_question = pending.question.id == *question,
+                same_fingerprint = pending.question.fingerprint == *fingerprint,
                 "an answer was refused as stale"
             );
 
             return Err(WireError::Stale);
         }
 
-        let steps = Self::picker()?.steps(&pending.asks, answers)?;
+        let steps = Self::picker()?.steps(
+            &pending.question.asks,
+            answers,
+            pending.ticks.as_deref(),
+        )?;
         let pane = self.running_in(id).await?;
 
         for step in steps {
@@ -1293,11 +1296,14 @@ impl ConversationPort for LiveConversations {
             }
         }
 
-        // A set of several ends on a review screen; a single question submits
-        // the moment its row is pressed. Measured on a live harness rather than
-        // predicted, and the count is what separates them - looking for a review
-        // after a single answer waits for a screen that is never coming.
-        if pending.asks.len() > 1 {
+        // A set of several ends on a review screen, and so does a single
+        // multi-select question: the harness draws its submit strip for both.
+        // Measured on a live harness rather than predicted. A single one-of-N
+        // question submits the moment its row is pressed, and looking for a
+        // review after one waits for a screen that is never coming.
+        if pending.question.asks.len() > 1
+            || pending.question.asks.iter().any(|ask| ask.multi_select)
+        {
             self.submit_review(&pane).await?;
         }
 
@@ -1308,7 +1314,7 @@ impl ConversationPort for LiveConversations {
             "an answer was typed into the pane"
         );
 
-        self.confirm_taken(&pane, &pending).await
+        self.confirm_taken(&pane, &pending.question).await
     }
 
 }

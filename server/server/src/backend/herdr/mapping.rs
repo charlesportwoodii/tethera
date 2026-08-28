@@ -1,5 +1,6 @@
 use super::ids::HerdrIds;
 use super::wire::{AgentSession, AgentSessionKind, PaneInfo, PaneLayout, Snapshot, WorkspaceInfo};
+use crate::paths::PathName;
 use std::collections::BTreeMap;
 use tethera_common::structs::agent::Agent;
 use tethera_common::structs::ids::{ConversationId, ProfileId, TabId};
@@ -254,13 +255,7 @@ impl Mapping {
     pub fn conversation_of(session: &AgentSession) -> Option<ConversationId> {
         let value = match session.kind {
             AgentSessionKind::Id => Self::text(Some(session.value.as_str()))?,
-            AgentSessionKind::Path => {
-                let stem = std::path::Path::new(&session.value)
-                    .file_stem()
-                    .map(|stem| stem.to_string_lossy().into_owned())?;
-
-                Self::text(Some(stem.as_str()))?
-            }
+            AgentSessionKind::Path => Self::text(Some(PathName::stem(&session.value)))?,
             AgentSessionKind::Unknown => return None,
         };
 

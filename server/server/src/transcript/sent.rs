@@ -1,4 +1,5 @@
 use super::AssetNaming;
+use crate::paths::PathName;
 use std::path::{Path, PathBuf};
 
 /// The files a person sent, read back out of their own prompt.
@@ -125,13 +126,11 @@ impl SentFiles {
     /// Only the exact shape the store writes is stripped, so a file genuinely
     /// named with a leading hyphenated word keeps it.
     pub fn readable_name(path: &Path) -> String {
-        let stored = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let spelling = path.to_string_lossy();
+        let stored = PathName::basename(&spelling);
 
         let Some((prefix, rest)) = stored.split_once('-') else {
-            return stored;
+            return stored.to_string();
         };
 
         let stored_by_us = prefix.len() == AssetNaming::STORED_PREFIX_WIDTH
@@ -141,7 +140,7 @@ impl SentFiles {
         if stored_by_us {
             rest.to_string()
         } else {
-            stored
+            stored.to_string()
         }
     }
 }

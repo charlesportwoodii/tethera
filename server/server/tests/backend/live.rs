@@ -563,7 +563,8 @@ fn a_permission_prompt_is_read_off_the_screen_and_answered_by_a_press() {
         .position(|option| option.label.eq_ignore_ascii_case("No"))
         .expect("a way to decline");
 
-    for step in picker().steps(&question.asks, &[Answer::Choice(refuse as u16)])
+    for step in picker()
+        .steps(&question.asks, &[Answer::Choice(refuse as u16)], None)
         .expect("presses for the refusal")
     {
         match step {
@@ -642,7 +643,7 @@ fn poll_for_prompt(
         last = backend.screen(pane).unwrap_or_default();
 
         if let Some(found) = detector().detect(&last) {
-            return found;
+            return found.question;
         }
 
         std::thread::sleep(Duration::from_millis(500));

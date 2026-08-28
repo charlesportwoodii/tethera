@@ -1,4 +1,4 @@
-use crate::terminal::PromptDetector;
+use crate::terminal::{PendingQuestion, PromptDetector};
 use crate::transcript::{SessionCatalog, StatusRule, TranscriptReader};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -74,7 +74,7 @@ impl BlockWatch {
     /// and a gate that is busy answers `Busy`. Folding that into "no question"
     /// dismisses a prompt that is still on the screen, and then refuses the
     /// answer a person sends against it as being for a question nobody asked.
-    pub async fn pending(&self, id: &ConversationId) -> Result<Option<Question>, WireError> {
+    pub async fn pending(&self, id: &ConversationId) -> Result<Option<PendingQuestion>, WireError> {
         let recorded = self.recorded(id).await;
 
         if let Ok(Some(found)) = recorded {
@@ -93,9 +93,9 @@ impl BlockWatch {
     /// permission prompt is never written down; and an absence is only reported
     /// as an absence when both sources were actually consulted.
     pub fn settle(
-        recorded: Result<Option<Question>, WireError>,
-        on_screen: Result<Option<Question>, WireError>,
-    ) -> Result<Option<Question>, WireError> {
+        recorded: Result<Option<PendingQuestion>, WireError>,
+        on_screen: Result<Option<PendingQuestion>, WireError>,
+    ) -> Result<Option<PendingQuestion>, WireError> {
         match (recorded, on_screen) {
             // A question was found. That the other source failed no longer
             // matters, because there is nothing left to be uncertain about.
@@ -200,7 +200,7 @@ impl BlockWatch {
     }
 
     /// The pending set as the records have it.
-    async fn recorded(&self, id: &ConversationId) -> Result<Option<Question>, WireError> {
+    async fn recorded(&self, id: &ConversationId) -> Result<Option<PendingQuestion>, WireError> {
         let Some(session) = id.as_str().strip_prefix(ConversationId::PREFIX) else {
             return Ok(None);
         };
@@ -230,7 +230,10 @@ impl BlockWatch {
         })?
         ?;
 
-        Ok(StatusRule::pending_question(&tail.items))
+        // The records cannot know what is ticked on a screen they never saw, and
+        // `None` says so rather than reporting every row clear.
+        Ok(StatusRule::pending_question(&tail.items)
+            .map(|question| PendingQuestion::new(question, None)))
     }
 
     /// The pending prompt as the agent has it on screen.
@@ -238,7 +241,7 @@ impl BlockWatch {
     /// Only reached when the records have nothing, which is the common case: a
     /// permission prompt is the question a person is asked most often and the
     /// one the records never carry.
-    async fn on_screen(&self, id: &ConversationId) -> Result<Option<Question>, WireError> {
+    async fn on_screen(&self, id: &ConversationId) -> Result<Option<PendingQuestion>, WireError> {
         // Nothing is running, so nothing is drawing a prompt. An absence this
         // machine is sure of.
         let Some(pane) = self
@@ -323,6 +326,11 @@ impl BlockWatch {
                         continue;
                     }
                 };
+
+                // What a watcher publishes is the question itself. The tick
+                // state beside it is for driving the picker, and never leaves
+                // this machine.
+                let found = found.map(|pending| pending.question);
 
                 match (&asked, &found) {
                     // Cleared, by any route — including somebody answering at the

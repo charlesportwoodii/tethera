@@ -383,6 +383,23 @@ fn a_conversation_id_comes_from_an_agents_own_session_identity() {
         Mapping::conversation_of(&by_path).map(|id| id.as_str().to_owned()),
         Some("cv_9f3c1122".to_string())
     );
+
+    // The same session, recorded by a herdr on a POSIX machine. The id has to
+    // come out identical: `Path::file_stem` splits on the *reader's* separator,
+    // so one of these two spellings would otherwise mint an id containing the
+    // whole path -- and every `conversation` in the tree would point at nothing
+    // on that platform only.
+    let posix = AgentSession {
+        source: "report".into(),
+        agent: "claude".into(),
+        kind: AgentSessionKind::Path,
+        value: "/home/charl/.claude/projects/tethera/9f3c1122.jsonl".into(),
+    };
+
+    assert_eq!(
+        Mapping::conversation_of(&posix).map(|id| id.as_str().to_owned()),
+        Some("cv_9f3c1122".to_string())
+    );
 }
 
 #[test]

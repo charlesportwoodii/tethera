@@ -2,8 +2,9 @@ use tethera_common::protocol::error::WireError;
 use tethera_common::structs::ids::QuestionId;
 use tethera_common::structs::transcript::{Ask, Question};
 use tethera_server_lib::protocol::live::BlockWatch;
+use tethera_server_lib::terminal::PendingQuestion;
 
-fn a_question(prompt: &str) -> Question {
+fn a_question(prompt: &str) -> PendingQuestion {
     let asks = vec![Ask {
         header: None,
         prompt: prompt.to_string(),
@@ -12,11 +13,14 @@ fn a_question(prompt: &str) -> Question {
         allows_free_text: false,
     }];
 
-    Question {
-        id: QuestionId::mint(prompt),
-        fingerprint: Question::fingerprint_of(&asks),
-        asks,
-    }
+    PendingQuestion::new(
+        Question {
+            id: QuestionId::mint(prompt),
+            fingerprint: Question::fingerprint_of(&asks),
+            asks,
+        },
+        None,
+    )
 }
 
 // **The bug this exists to prevent.** Reading the screen is a subprocess behind

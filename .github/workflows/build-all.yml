@@ -1,6 +1,5 @@
 name: Build all
 
-# Inert on purpose. Add `push:` and `pull_request:` here to enable.
 on:
   workflow_dispatch:
   pull_request:
@@ -15,6 +14,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       relay: ${{ steps.filter.outputs.relay }}
       client: ${{ steps.filter.outputs.client }}
+      ci: ${{ steps.filter.outputs.ci }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -31,10 +31,20 @@ jobs:
               - 'relay/**'
             client:
               - 'client/**'
+            # Everything that changes how a build runs rather than what it
+            # builds. Without this a change to build-android.yml matches no
+            # filter, so the job it rewrote is the one job that does not run.
+            ci:
+              - '.github/**'
+              - 'mise.toml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
 
   tests:
     needs: changes
     if: |
+      needs.changes.outputs.ci == 'true' ||
       needs.changes.outputs.common == 'true' ||
       needs.changes.outputs.transport == 'true' ||
       needs.changes.outputs.server == 'true' ||
@@ -45,6 +55,7 @@ jobs:
   build-server:
     needs: changes
     if: |
+      needs.changes.outputs.ci == 'true' ||
       needs.changes.outputs.common == 'true' ||
       needs.changes.outputs.transport == 'true' ||
       needs.changes.outputs.server == 'true'
@@ -53,6 +64,7 @@ jobs:
   build-relay:
     needs: changes
     if: |
+      needs.changes.outputs.ci == 'true' ||
       needs.changes.outputs.common == 'true' ||
       needs.changes.outputs.relay == 'true'
     uses: ./.github/workflows/build-relay.yml
@@ -60,13 +72,17 @@ jobs:
   build-android:
     needs: changes
     if: |
+      needs.changes.outputs.ci == 'true' ||
       needs.changes.outputs.common == 'true' ||
       needs.changes.outputs.client == 'true'
     uses: ./.github/workflows/build-android.yml
+    secrets: inherit
 
   build-ios:
     needs: changes
     if: |
+      needs.changes.outputs.ci == 'true' ||
       needs.changes.outputs.common == 'true' ||
       needs.changes.outputs.client == 'true'
     uses: ./.github/workflows/build-ios.yml
+    secrets: inherit

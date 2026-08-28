@@ -33,7 +33,8 @@ fn detector() -> PromptDetector {
 #[test]
 fn a_permission_prompt_is_read_off_the_screen() {
     let question = detector().detect(&screen("permission-write.txt"))
-        .expect("the agent is asking to create a file");
+        .expect("the agent is asking to create a file")
+        .question;
 
     let ask = &question.asks[0];
 
@@ -53,7 +54,8 @@ fn a_permission_prompt_is_read_off_the_screen() {
 #[test]
 fn an_agent_question_picker_is_read_by_the_same_detector() {
     let question = detector().detect(&screen("ask-user-question.txt"))
-        .expect("the agent is asking which route owns pair");
+        .expect("the agent is asking which route owns pair")
+        .question;
 
     let ask = &question.asks[0];
 
@@ -72,7 +74,7 @@ fn an_agent_question_picker_is_read_by_the_same_detector() {
 #[test]
 fn the_rows_are_numbered_from_one_and_consecutive() {
     for name in ["permission-write.txt", "ask-user-question.txt"] {
-        let question = detector().detect(&screen(name)).expect(name);
+        let question = detector().detect(&screen(name)).expect(name).question;
 
         assert!(
             !question.asks[0].options.is_empty(),
@@ -88,7 +90,8 @@ fn the_rows_are_numbered_from_one_and_consecutive() {
 #[test]
 fn the_harness_chrome_below_the_rule_is_not_an_answer() {
     let question = detector().detect(&screen("ask-user-question.txt"))
-        .expect("the agent is asking which route owns pair");
+        .expect("the agent is asking which route owns pair")
+        .question;
 
     let labels: Vec<&str> = question.asks[0]
         .options
@@ -108,7 +111,7 @@ fn the_harness_chrome_below_the_rule_is_not_an_answer() {
 #[test]
 fn the_keyboard_hint_is_not_read_as_an_options_description() {
     for name in ["ask-user-question.txt", "permission-write.txt"] {
-        let question = detector().detect(&screen(name)).expect(name);
+        let question = detector().detect(&screen(name)).expect(name).question;
 
         for option in &question.asks[0].options {
             let said = option.description.as_deref().unwrap_or_default();
@@ -137,7 +140,8 @@ fn the_keyboard_hint_is_not_read_as_an_options_description() {
 #[test]
 fn the_free_text_row_is_a_capability_rather_than_an_option() {
     let question = detector().detect(&screen("ask-user-question.txt"))
-        .expect("the agent is asking which route owns pair");
+        .expect("the agent is asking which route owns pair")
+        .question;
 
     let ask = &question.asks[0];
     let labels: Vec<&str> = ask.options.iter().map(|o| o.label.as_str()).collect();
@@ -156,7 +160,8 @@ fn the_free_text_row_is_a_capability_rather_than_an_option() {
 #[test]
 fn a_permission_prompt_keeps_every_row_including_the_refusal() {
     let question = detector().detect(&screen("permission-write.txt"))
-        .expect("the agent is asking to create a file");
+        .expect("the agent is asking to create a file")
+        .question;
 
     let ask = &question.asks[0];
 
@@ -183,8 +188,8 @@ fn typing_into_the_free_text_row_does_not_change_the_question() {
 
     assert_ne!(blank, typed, "the fixture no longer has the row this pins");
 
-    let before = detector().detect(&blank).expect("a question");
-    let after = detector().detect(&typed).expect("the same question");
+    let before = detector().detect(&blank).expect("a question").question;
+    let after = detector().detect(&typed).expect("the same question").question;
 
     assert_eq!(
         before.fingerprint, after.fingerprint,
@@ -212,7 +217,10 @@ fn a_screen_with_no_question_on_it_is_not_one() {
         let found = detector().detect(not_a_prompt);
 
         assert!(
-            found.is_none() || found.as_ref().is_some_and(|q| !q.asks[0].prompt.is_empty()),
+            found.is_none()
+                || found
+                    .as_ref()
+                    .is_some_and(|q| !q.question.asks[0].prompt.is_empty()),
             "detected a question in {not_a_prompt:?}"
         );
     }
@@ -223,13 +231,13 @@ fn a_screen_with_no_question_on_it_is_not_one() {
 // an answer would land on whatever replaced it.
 #[test]
 fn the_same_prompt_detects_as_the_same_question_twice() {
-    let once = detector().detect(&screen("permission-write.txt")).expect("a question");
-    let again = detector().detect(&screen("permission-write.txt")).expect("a question");
+    let once = detector().detect(&screen("permission-write.txt")).expect("a question").question;
+    let again = detector().detect(&screen("permission-write.txt")).expect("a question").question;
 
     assert_eq!(once.id, again.id);
     assert_eq!(once.fingerprint, again.fingerprint);
 
-    let other = detector().detect(&screen("ask-user-question.txt")).expect("a question");
+    let other = detector().detect(&screen("ask-user-question.txt")).expect("a question").question;
 
     assert_ne!(once.id, other.id);
     assert_ne!(once.fingerprint, other.fingerprint);
@@ -242,7 +250,8 @@ fn the_same_prompt_detects_as_the_same_question_twice() {
 #[test]
 fn the_side_by_side_picker_is_read_as_a_question() {
     let question = detector().detect(&screen("side-by-side.txt"))
-        .expect("a side-by-side picker is still a question");
+        .expect("a side-by-side picker is still a question")
+        .question;
 
     let ask = &question.asks[0];
     let labels: Vec<&str> = ask.options.iter().map(|o| o.label.as_str()).collect();
@@ -257,7 +266,7 @@ fn the_side_by_side_picker_is_read_as_a_question() {
 // offering a field the screen does not have.
 #[test]
 fn the_side_by_side_picker_has_no_free_text_row_to_lift() {
-    let question = detector().detect(&screen("side-by-side.txt")).expect("a question");
+    let question = detector().detect(&screen("side-by-side.txt")).expect("a question").question;
     let ask = &question.asks[0];
 
     assert_eq!(ask.options.len(), 3, "a real option was taken for an affordance");
@@ -272,7 +281,7 @@ fn the_side_by_side_picker_has_no_free_text_row_to_lift() {
 // row, because there it really is one.
 #[test]
 fn the_plain_picker_still_lifts_its_free_text_row() {
-    let question = detector().detect(&screen("ask-user-question.txt")).expect("a question");
+    let question = detector().detect(&screen("ask-user-question.txt")).expect("a question").question;
 
     assert!(question.asks[0].allows_free_text);
 }
@@ -284,8 +293,10 @@ fn the_plain_picker_still_lifts_its_free_text_row() {
 // rows are scrollback — so this screen must still be read as a question.
 #[test]
 fn a_picker_holding_a_full_height_pane_is_still_a_question() {
-    let question =
-        detector().detect(&screen("picker-full-height.txt")).expect("the agent is asking");
+    let question = detector()
+        .detect(&screen("picker-full-height.txt"))
+        .expect("the agent is asking")
+        .question;
     let ask = &question.asks[0];
 
     assert_eq!(ask.prompt, "Which route owns pair?");
@@ -306,4 +317,83 @@ fn a_numbered_list_in_a_message_is_not_a_question() {
         detector().detect(&screen("echoed-list.txt")).is_none(),
         "an echoed message was offered as a question a keystroke cannot answer"
     );
+}
+
+// A checkbox screen is a different question from a one-of-N screen. Read as
+// one-of-N it reaches a phone as radio buttons for a list meant to be ticked
+// several times, and the marker the harness draws is left sitting in the label.
+#[test]
+fn a_multi_select_picker_is_read_as_one() {
+    let question = detector()
+        .detect(&screen("ask-user-question-multi.txt"))
+        .expect("a multi-select picker is a question")
+        .question;
+
+    let ask = &question.asks[0];
+    let labels: Vec<&str> = ask.options.iter().map(|o| o.label.as_str()).collect();
+
+    assert!(ask.multi_select, "every row on that screen carried a checkbox");
+    assert_eq!(labels, vec!["Blocked", "File", "Ping", "Done"]);
+    assert!(ask.allows_free_text, "the free-text row is still lifted out");
+}
+
+// A security test, not a formatting one. `Question::fingerprint_of` hashes
+// labels and an answer is refused when the fingerprint it was composed against
+// has moved, so a marker left in the label means an operator ticking a row at
+// the machine invalidates the answer already travelling from a phone.
+#[test]
+fn a_tick_made_at_the_machine_does_not_move_the_fingerprint() {
+    let clean = detector()
+        .detect(&screen("ask-user-question-multi.txt"))
+        .expect("a multi-select picker is a question")
+        .question;
+
+    let ticked = detector()
+        .detect(&screen("ask-user-question-multi-ticked.txt"))
+        .expect("the same picker with a row ticked is the same question")
+        .question;
+
+    assert_eq!(clean.fingerprint, ticked.fingerprint);
+    assert_eq!(clean.id, ticked.id);
+}
+
+// What the driver needs and the wire must not carry: which rows were already
+// ticked when the screen was read. Sending the phone's chosen set blind would
+// clear a row the operator had ticked at the machine, because a number key
+// toggles rather than sets.
+#[test]
+fn the_ticked_rows_are_reported_with_the_question() {
+    let pending = detector()
+        .detect(&screen("ask-user-question-multi-ticked.txt"))
+        .expect("a multi-select picker is a question");
+
+    assert_eq!(
+        pending.ticks_for(0),
+        Some([false, true, false, false].as_slice())
+    );
+}
+
+// A screen with no checkboxes has no tick state to report, and `None` is how the
+// driver is told to fall back to pressing every chosen row.
+#[test]
+fn a_single_select_screen_reports_no_ticks() {
+    let pending = detector()
+        .detect(&screen("ask-user-question-two.txt"))
+        .expect("a two-question set still has a first question");
+
+    assert_eq!(pending.ticks_for(0), None);
+}
+
+// The screens that draw no checkbox must be untouched by any of this.
+#[test]
+fn a_screen_without_checkboxes_stays_single_select() {
+    let question = detector()
+        .detect(&screen("ask-user-question-two.txt"))
+        .expect("a two-question set still has a first question")
+        .question;
+
+    let ask = &question.asks[0];
+
+    assert!(!ask.multi_select);
+    assert_eq!(ask.options[0].label, "Rewrite");
 }

@@ -16,23 +16,121 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: ./.github/actions/setup-rust
         with:
           target: aarch64-apple-ios
 
       - run: mise trust --all
+
+      # `client/src/js/bindings/` is gitignored, so a fresh checkout has no
+      # generated TypeScript and the frontend would compile against types that
+      # are not there.
+      - run: mise run bindings
       - run: mise run deps
-      - run: mise run frontend
-      - run: cd client && yarn tauri ios build --debug --ci
+
+      # `client/src-tauri/gen/` is gitignored: the Xcode project is generated
+      # and never committed, so CI has to make one before it can build one.
+      # Without this the build fails with "Xcode project directory doesn't
+      # exist".
+      - name: Initialise the Xcode project
+        working-directory: client
+        run: yarn tauri ios init
+
+      - name: Install the signing certificate and provisioning profile
+        id: signing
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          # Scoped to this run: the keychain is created here and destroyed at the
+          # end of the job, so the password only has to outlive the job.
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          set -eu
+
+          CERTIFICATE="$RUNNER_TEMP/certificate.p12"
+          PROFILE="$RUNNER_TEMP/profile.mobileprovision"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PROFILE"
+
+          # A keychain of our own rather than the login keychain, so nothing
+          # this job installs outlives it on a runner image.
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          security import "$CERTIFICATE" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN"
+
+          # Xcode finds an installed profile by its UUID and by nothing else, so
+          # the file has to be named for the UUID inside it.
+          UUID="$(/usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin <<< "$(security cms -D -i "$PROFILE")")"
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PROFILE" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
+
+          echo "profile_uuid=$UUID" >> "$GITHUB_OUTPUT"
+
+      # After init, which writes a project set to Automatic signing.
+      - name: Switch the project to manual signing
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
+        run: node .github/scripts/ios-manual-signing.mjs
+
+      - name: Prepare ExportOptions.plist
+        working-directory: client
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          IOS_PROFILE_UUID: ${{ steps.signing.outputs.profile_uuid }}
+        run: |
+          set -eu
+
+          sed -e "s/__TEAM_ID__/$APPLE_TEAM_ID/g" \
+              -e "s/__PROFILE_UUID__/$IOS_PROFILE_UUID/g" \
+              src-tauri/ExportOptions.ios.plist > src-tauri/gen/apple/ExportOptions.plist
+
+          cat src-tauri/gen/apple/ExportOptions.plist
+
+      # tauri.conf.json's beforeBuildCommand builds the SvelteKit frontend, so
+      # there is no separate frontend step here.
+      - name: Build the iOS app
+        working-directory: client
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: yarn tauri ios build --export-method app-store-connect
+
+      - name: Collect the IPA
+        working-directory: client
+        run: |
+          set -eu
+
+          IPA="$(find src-tauri/gen/apple/build -name '*.ipa' -type f | sort | head -1 || true)"
+
+          if [ -z "$IPA" ]; then
+            echo "FAIL the build reported success but wrote no IPA."
+            find src-tauri/gen/apple/build -type f || true
+            exit 1
+          fi
+
+          cp "$IPA" tethera-ios-release.ipa
+          ls -la tethera-ios-release.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tethera-ios-debug
-          path: client/src-tauri/gen/apple/build/**/*.ipa
-          if-no-files-found: warn
+          name: tethera-ios-release-ipa
+          path: client/tethera-ios-release.ipa
+          if-no-files-found: error
 
-      # Enable by adding App Store Connect API key credentials as secrets
-      # and a TestFlight upload step (e.g. apple-actions/upload-testflight-build) above.
-      - name: Upload to TestFlight
-        if: false
-        run: echo "TestFlight upload not wired up yet"
+      # A distribution identity and a provisioning profile on a shared runner.
+      # Removed unconditionally, because a failed build is exactly when they are
+      # still installed.
+      - name: Remove the signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null || true

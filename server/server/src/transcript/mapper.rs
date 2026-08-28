@@ -2,6 +2,7 @@ use super::{
     AssetIndex, AssetNaming, ContentBlock, MarkdownTables, Record, Segment, SentFiles,
     SlashCommand, ToolOutcome,
 };
+use crate::paths::PathName;
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -751,10 +752,10 @@ impl TurnMapper {
         let name = if stored_here {
             SentFiles::readable_name(as_path)
         } else {
-            as_path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.to_string())
+            match PathName::basename(path) {
+                "" => path.to_string(),
+                name => name.to_string(),
+            }
         };
 
         let fallback = match size {

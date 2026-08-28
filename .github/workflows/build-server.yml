@@ -15,22 +15,58 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          # Statically linked, so the binary runs on a distribution older than
+          # the runner's glibc and inside a distroless or Alpine image.
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+          # On the arm runner rather than cross-compiled from x86_64: musl-gcc
+          # from `musl-tools` targets the host architecture only.
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          # macos-latest is arm64. The x86_64 slice cross-compiles on it with no
+          # extra linker, because the macOS SDK carries both architectures.
+          - os: macos-latest
+            target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
+    env:
+      # `mise run build-server` is a bare `cargo build` with no `--target`, so
+      # the triple reaches cargo through the environment rather than by forking
+      # the task. Every entry sets it, including the ones that were already
+      # native: it moves the output under `target/<triple>/`, and a path that
+      # was right for some entries and wrong for others is the harder bug.
+      CARGO_BUILD_TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
+
+      # The Rust std for a musl target is a rustup component, but the linker is
+      # not. libsqlite3-sys also compiles bundled SQLite through `cc`, which
+      # finds musl-gcc by name.
+      - name: Install musl toolchain
+        if: endsWith(matrix.target, '-musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends musl-tools musl-dev
+
       - uses: ./.github/actions/setup-rust
         with:
           target: ${{ matrix.target }}
+
       - run: mise trust --all
       - run: mise run build-server
+
       - uses: actions/upload-artifact@v4
         with:
           name: tethera-${{ matrix.target }}
           path: |
-            target/debug/tethera
-            target/debug/tethera.exe
-          if-no-files-found: warn
+            target/${{ matrix.target }}/debug/tethera
+            target/${{ matrix.target }}/debug/tethera.exe
+          # `warn` is how a build that produced nothing reported success. Every
+          # entry here is expected to yield a binary, so an absent one is a
+          # failure and not a note in the log.
+          if-no-files-found: error

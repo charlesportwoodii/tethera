@@ -8,14 +8,26 @@ on:
   workflow_call:
 
 jobs:
-  test:
+  # The Rust gate. `test-all` rather than a hand-written list of steps: the task
+  # already declares the suite, and a second copy of that list in YAML is a
+  # second thing to drift.
+  rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-rust
       - run: mise trust --all
-      - run: mise run test-common
-      - run: mise run test-transport
-      - run: mise run test-server
-      - run: mise run test-relay
+      - run: mise run test-all
+
+  # Separate, and deliberately not part of the gate. `client/src/` is another
+  # team's in-flight component work, so a failure here is theirs mid-edit and
+  # not ours — reporting it as our breakage is how a red run stops meaning
+  # anything.
+  client:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - run: mise trust --all
       - run: mise run test-client

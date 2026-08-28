@@ -1,0 +1,37 @@
+     'C:/Users/charl/projects/tethera/gateway/hooks/tethera-pane-
+     index.ps1' is not recognized as the name of a script file.
+     Check the spelling of the name…
+
+❯ Call AskUserQuestion exactly once, with multiSelect true, and
+  nothing else at all: header "Triggers", question "Which
+  triggers should ship?", four options labelled Blocked, File,
+  Ping, Done, each with a one-line description. Do not read any
+  file. Do not use any other tool.
+
+● User answered Claude's questions:
+  ⎿  · Which triggers should ship? → File
+
+● File is the only trigger selected.
+
+✻ Sautéed for 4s · done 7:16 PM
+
+❯ Call AskUserQuestion exactly once with TWO questions, both
+  multiSelect false, and nothing else at all. Q1 header "Route",
+  question "Which route owns pair?", options Rewrite and
+  Register. Q2 header "Store", question "Which store holds it?",
+  options Sqlite and Memory. One-line descriptions. No
+  previews. Do not read any file. Do not use any other tool.
+─────────────────────────────────────────────────────────────────
+←  ☐ Route  ☐ Store  ✔ Submit  →
+
+Which route owns pair?
+
+❯ 1. Rewrite
+     Rework the existing route to take ownership of pairing.
+  2. Register
+     Add a new dedicated route that owns pairing.
+  3. Type something.
+─────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

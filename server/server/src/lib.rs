@@ -4,6 +4,7 @@ pub mod config;
 pub mod identity;
 pub mod logging;
 pub mod machine;
+pub mod paths;
 pub mod process;
 pub mod protocol;
 pub mod runtime;

@@ -1,3 +1,4 @@
+use crate::terminal::PendingQuestion;
 use tethera_common::structs::agent::{Agent, ScreenChrome};
 use tethera_common::structs::transcript::{Ask, Question, QuestionOption};
 use tethera_common::structs::ids::QuestionId;
@@ -46,16 +47,46 @@ impl PromptDetector {
     /// something the agent never asked.
     const PROMPT_WITHIN: usize = 3;
 
+    /// The two checkbox markers a multi-select picker draws.
+    ///
+    /// Exactly these forms, trailing space included. A label that merely begins
+    /// with a bracket is not a checkbox, and reading it as one would claim
+    /// multi-select over a screen whose rows do not toggle — every answer sent
+    /// against it would then press numbers that select rather than tick.
+    const MARKERS: [(&'static str, bool); 2] = [("[ ] ", false), ("[✔] ", true)];
+
+    /// A row's checkbox state, and the label with the marker taken off.
+    ///
+    /// The marker must never reach the label. `Question::fingerprint_of` hashes
+    /// labels and an answer is refused once its fingerprint has moved, so a tick
+    /// made at the machine would invalidate an answer already travelling from a
+    /// phone.
+    fn split_marker(label: &str) -> (Option<bool>, &str) {
+        for (marker, ticked) in Self::MARKERS {
+            if let Some(rest) = label.strip_prefix(marker) {
+                return (Some(ticked), rest.trim_start());
+            }
+        }
+
+        (None, label)
+    }
+
     /// What the agent is asking, if it is asking anything.
-    pub fn detect(&self, screen: &str) -> Option<Question> {
+    pub fn detect(&self, screen: &str) -> Option<PendingQuestion> {
         let lines: Vec<&str> = screen.lines().collect();
-        let (first_row, mut options, closed_by_rule) = self.options(&lines)?;
+        let (first_row, mut options, mut marks, closed_by_rule) = self.options(&lines)?;
 
         // The side-by-side picker has no free-text row to lift, so lifting one
         // there removes a real option and offers a field the screen does not
         // have. Measured against both layouts on a live agent.
         let allows_free_text = !self.is_side_by_side(screen)
             && Self::lift_free_text(&mut options, closed_by_rule);
+
+        // The free-text row draws a checkbox of its own, so its mark leaves with
+        // it. Left behind, every mark after it would name the wrong row.
+        if allows_free_text {
+            marks.pop();
+        }
 
         // A row closed by a blank line carries an empty description as a marker.
         // It is bookkeeping, not something a person should be shown.
@@ -74,10 +105,10 @@ impl PromptDetector {
             header: None,
             prompt,
             options,
-            // A screen-drawn prompt is one choice. A multi-select picker draws
-            // checkboxes, and this detector does not read them - so it declines
-            // to claim a shape it cannot answer.
-            multi_select: false,
+            // A checkbox on every row, or on none. A partly marked list is a
+            // shape nobody has measured, and claiming multi-select over one
+            // would answer it by pressing numbers at rows that do not toggle.
+            multi_select: !marks.is_empty() && marks.iter().all(Option::is_some),
             // Not a row. A person types into a field the client draws, and the
             // answer comes back as `Answer::Text` — which the picker already
             // knows how to deliver.
@@ -86,15 +117,26 @@ impl PromptDetector {
 
         let fingerprint = Question::fingerprint_of(&asks);
 
-        Some(Question {
-            // Derived from the fingerprint, so the same prompt on screen is the
-            // same id for as long as it is up, and a different prompt is a
-            // different question. Nothing else about a screen is stable enough
-            // to be an identity.
-            id: QuestionId::mint(fingerprint.0.as_str()),
-            fingerprint,
-            asks,
-        })
+        // Ticks are reported only for a screen that draws them. On a
+        // single-select list there is nothing to observe, and an all-false
+        // vector would read as "every row is clear" rather than "there are no
+        // rows to clear".
+        let ticks = asks[0]
+            .multi_select
+            .then(|| vec![marks.iter().map(|mark| mark == &Some(true)).collect()]);
+
+        Some(PendingQuestion::new(
+            Question {
+                // Derived from the fingerprint, so the same prompt on screen is
+                // the same id for as long as it is up, and a different prompt is
+                // a different question. Nothing else about a screen is stable
+                // enough to be an identity.
+                id: QuestionId::mint(fingerprint.0.as_str()),
+                fingerprint,
+                asks,
+            },
+            ticks,
+        ))
     }
 
     /// The numbered rows, and the line the first of them is on.
@@ -102,10 +144,14 @@ impl PromptDetector {
     /// Numbered from one and consecutive. A list that starts at two, or skips a
     /// number, is not a picker this can drive: the number pressed is the row
     /// selected, so a gap would select the wrong one.
-    fn options(&self, lines: &[&str]) -> Option<(usize, Vec<QuestionOption>, bool)> {
+    fn options(
+        &self,
+        lines: &[&str],
+    ) -> Option<(usize, Vec<QuestionOption>, Vec<Option<bool>>, bool)> {
         let mut first_row = None;
         let mut last_row = 0;
         let mut options: Vec<QuestionOption> = Vec::new();
+        let mut marks: Vec<Option<bool>> = Vec::new();
         let mut closed_by_rule = false;
 
         for (index, line) in lines.iter().enumerate() {
@@ -119,7 +165,7 @@ impl PromptDetector {
                 break;
             }
 
-            let Some((number, label)) = self.numbered(line) else {
+            let Some((number, ticked, label)) = self.numbered(line) else {
                 // An indented line directly under a row is that row's
                 // description, wrapped. A line after a blank one is not: the
                 // blank ended the row, and what follows is the footer.
@@ -152,6 +198,7 @@ impl PromptDetector {
                 label,
                 description: None,
             });
+            marks.push(ticked);
         }
 
         let at = first_row?;
@@ -160,7 +207,7 @@ impl PromptDetector {
             return None;
         }
 
-        Some((at, options, closed_by_rule))
+        Some((at, options, marks, closed_by_rule))
     }
 
     /// Whether this is the picker that draws a preview beside its options.
@@ -254,19 +301,21 @@ impl PromptDetector {
             .map(str::to_string)
     }
 
-    /// `❯ 1. Yes` and `  2. No` both, with the number and the label.
-    fn numbered(&self, line: &str) -> Option<(usize, String)> {
+    /// `❯ 1. Yes` and `  2. No` both, with the number, any checkbox and the
+    /// label.
+    fn numbered(&self, line: &str) -> Option<(usize, Option<bool>, String)> {
         let text = line.trim_start().trim_start_matches(self.chrome.cursor).trim_start();
         let (digits, rest) = text.split_at(text.find('.')?);
         let number: usize = digits.parse().ok()?;
 
         let label = Self::before_the_preview(rest.strip_prefix('.')?).trim();
+        let (ticked, label) = Self::split_marker(label);
 
         if label.is_empty() {
             return None;
         }
 
-        Some((number, label.to_string()))
+        Some((number, ticked, label.to_string()))
     }
 
     /// The part of a row that is the option, not the pane drawn beside it.

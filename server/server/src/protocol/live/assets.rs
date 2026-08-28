@@ -1,4 +1,5 @@
 use crate::config::ApplicationConfig;
+use crate::paths::PathName;
 use crate::protocol::live::{AssetDigests, LiveConversations};
 use crate::protocol::ports::{AssetPort, ConversationPort};
 use crate::transcript::{AssetIndex, AssetNaming};
@@ -378,10 +379,11 @@ impl LiveAssets {
             .chars()
             .take(AssetNaming::STORED_PREFIX_WIDTH)
             .collect();
-        let safe: String = Path::new(&spec.name)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "upload".to_string())
+        let offered = match PathName::basename(&spec.name) {
+            "" => "upload",
+            name => name,
+        };
+        let safe: String = offered
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
                 c

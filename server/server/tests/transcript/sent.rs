@@ -115,6 +115,18 @@ fn a_stored_file_is_shown_under_the_name_the_person_gave_it() {
     assert_eq!(SentFiles::readable_name(&path), "progress-probe.txt");
 }
 
+// The same name, spelled the other way. `Path::file_name` splits on the host's
+// separator only, so reading the Windows fixture above on Linux returned the
+// whole path as the name -- and reading this one on Windows would do the same in
+// reverse. The name a person sees is a property of the path, not of the machine
+// that happens to be reading it.
+#[test]
+fn a_stored_file_reads_the_same_whichever_separator_wrote_it() {
+    let posix = PathBuf::from("/home/charl/.local/share/alaydriem/tethera/data/uploads/78d52cec5b5b-progress-probe.txt");
+
+    assert_eq!(SentFiles::readable_name(&posix), "progress-probe.txt");
+}
+
 // And only the exact shape the store writes. A file genuinely named with a
 // hyphenated first word keeps it, or a person loses a word from their filename.
 #[test]

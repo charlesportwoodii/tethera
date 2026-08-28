@@ -21,23 +21,146 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
+      # r28 or later, pinned rather than floating: r28 is the first NDK whose
+      # linker defaults to a 16 KB max page size, which Play requires of every
+      # 64-bit native library. On an older NDK the build succeeds and Play
+      # rejects the upload, which is a slow way to find out.
+      #
+      # add-to-path is false so the NDK reaches the build through NDK_HOME only.
+      # A toolchain on PATH lets a `clang` that is not the NDK's answer for the
+      # cross compile, and that fails inside the linker.
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r28c
+          add-to-path: false
+
       - uses: ./.github/actions/setup-rust
         with:
-          target: aarch64-linux-android
+          # The two ABIs that run on real hardware. x86 and x86_64 are emulator
+          # images, and building them doubles the Rust compile for a slice no
+          # phone will install.
+          target: |
+            aarch64-linux-android
+            armv7-linux-androideabi
 
       - run: mise trust --all
+
+      # `client/src/js/bindings/` is gitignored, so a fresh checkout has no
+      # generated TypeScript and the frontend would compile against types that
+      # are not there.
+      - run: mise run bindings
       - run: mise run deps
-      - run: mise run frontend
-      - run: cd client && yarn tauri android build --apk --debug
+
+      # `client/src-tauri/gen/` is gitignored: the Android project is generated
+      # and never committed, so CI has to make one before it can build one.
+      # Without this the build fails with "Android Studio project directory
+      # doesn't exist".
+      - name: Initialise the Android project
+        working-directory: client
+        run: yarn tauri android init
+
+      # After init, because init rewrites app/build.gradle.kts.
+      - name: Configure release signing
+        working-directory: client
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -eu
+
+          KEYSTORE="$RUNNER_TEMP/upload-keystore.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+
+          # An absolute path, because `file(...)` in app/build.gradle.kts
+          # resolves a relative one against app/ while the properties file it
+          # came from sits a directory above.
+          {
+            echo "storeFile=$KEYSTORE"
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "keyPassword=$ANDROID_KEYSTORE_PASSWORD"
+          } > src-tauri/gen/android/keystore.properties
+
+          cat ../.github/android/signing.gradle.kts >> src-tauri/gen/android/app/build.gradle.kts
+
+      # tauri.conf.json's beforeBuildCommand builds the SvelteKit frontend, so
+      # there is no separate frontend step here.
+      - name: Build the Android app
+        working-directory: client
+        env:
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+
+          # Named explicitly rather than left to cargo-mobile2 to derive. It
+          # does derive them today, and when it stops, the failure is a linker
+          # error naming a host toolchain — which reads as a broken runner
+          # rather than as a missing variable.
+          #
+          # API 30 matches the client's minSdk.
+          CC_aarch64_linux_android: aarch64-linux-android30-clang
+          AR_aarch64_linux_android: llvm-ar
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: aarch64-linux-android30-clang
+
+          CC_armv7_linux_androideabi: armv7a-linux-androideabi30-clang
+          AR_armv7_linux_androideabi: llvm-ar
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER: armv7a-linux-androideabi30-clang
+        run: |
+          export PATH="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          yarn tauri android build --apk --aab --target aarch64 --target armv7
+
+      - name: Collect and verify the artifacts
+        working-directory: client
+        run: |
+          set -eu
+
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          OUTPUTS=src-tauri/gen/android/app/build/outputs
+
+          APK="$(find "$OUTPUTS/apk" -name '*release*.apk' -type f | sort | head -1 || true)"
+          AAB="$(find "$OUTPUTS/bundle" -name '*release*.aab' -type f | sort | head -1 || true)"
+
+          if [ -z "$APK" ] || [ -z "$AAB" ]; then
+            echo "FAIL the build reported success but did not write both an APK and an AAB."
+            find "$OUTPUTS" -type f || true
+            exit 1
+          fi
+
+          cp "$APK" tethera-android-release.apk
+          cp "$AAB" tethera-android-release.aab
+
+          # Verified rather than assumed. A signingConfig that failed to load
+          # leaves Gradle emitting an unsigned release artifact and reporting
+          # success, and Play refuses it hours later.
+          "$BUILD_TOOLS/apksigner" verify --verbose tethera-android-release.apk
+
+          # -P 16, not -p. -p aligns .so entries to 4 KB, which a device with 16
+          # KB memory pages cannot map, so the install fails on hardware the
+          # build gave no sign of excluding.
+          "$BUILD_TOOLS/zipalign" -c -P 16 4 tethera-android-release.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tethera-android-debug-apk
-          path: client/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-          if-no-files-found: warn
+          name: tethera-android-release-apk
+          path: client/tethera-android-release.apk
+          if-no-files-found: error
 
-      # Enable by adding Play Console service-account credentials as a secret
-      # and an upload step (e.g. r0adkll/upload-google-play) above.
-      - name: Upload to Play Console
-        if: false
-        run: echo "Play upload not wired up yet"
+      # The AAB is what Play takes. The APK is for sideloading onto a device
+      # without going through a track.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tethera-android-release-aab
+          path: client/tethera-android-release.aab
+          if-no-files-found: error
+
+      # A signing key and its password on a shared runner's disk. Removed
+      # unconditionally, because a failed build is exactly when they are still
+      # sitting there.
+      - name: Remove the signing material
+        if: always()
+        working-directory: client
+        run: |
+          rm -f "$RUNNER_TEMP/upload-keystore.jks"
+          rm -f src-tauri/gen/android/keystore.properties

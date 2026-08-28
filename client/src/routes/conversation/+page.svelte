@@ -17,13 +17,16 @@
     QuestionFlow,
     ThinkingRow,
     Timeline,
+    ToolFold,
     Turn,
   } from "$console";
   import { previewKind } from "$console";
   import HtmlPreview from "$components/HtmlPreview.svelte";
   import MarkdownBody from "$components/MarkdownBody.svelte";
   import { MarkdownTables } from "$managers/tables";
+  import { Activity } from "$managers/activity";
   import { Parts } from "$managers/parts";
+  import { Scroll } from "$managers/scroll";
   import { TranscriptManager, type Listen } from "$managers/transcript_manager";
   import { DownloadManager, type ListenDownloads } from "$managers/download_manager";
   import DownloadTray from "$components/DownloadTray.svelte";
@@ -38,6 +41,7 @@
   import type { AssetPreview } from "$bindings/AssetPreview";
   import type { Attached } from "$bindings/Attached";
   import type { Question } from "$bindings/Question";
+  import type { Turn as TurnRecord } from "$bindings/Turn";
 
   const server = page.url.searchParams.get("server") ?? "";
   const id = page.url.searchParams.get("id") ?? "";
@@ -197,16 +201,29 @@
     }
   }
 
-  // Arriving turns follow the tail only when the tail is already what somebody
-  // is looking at. Yanking the view down while they are reading history is the
-  // single most annoying thing a transcript can do.
+  // Whether an arriving turn scrolls the view. `Scroll.SLACK` is where the
+  // threshold and the reason for it live.
   let following = $state(true);
 
+  /**
+   * Follows the tail, and walks back into history when the reader nears the top.
+   *
+   * The guard against a burst is `anchoring`, which `earlier` sets before it
+   * awaits anything: a scroll gesture fires this many times over, and each one
+   * would otherwise ask for the same page.
+   *
+   * Restoring the anchor fires this again, which is deliberate. A reader still
+   * within reach of the top after a page landed wants the page before that one,
+   * and the walk stops on its own when the machine says there is no more.
+   */
   function onScroll(event: Event): void {
     const box = event.currentTarget as HTMLElement;
-    const slack = box.scrollHeight - box.scrollTop - box.clientHeight;
 
-    following = slack < 80;
+    following = Scroll.following(box.scrollTop, box.scrollHeight, box.clientHeight);
+
+    if (Scroll.atTop(box.scrollTop) && $hasEarlier && !anchoring) {
+      void earlier();
+    }
   }
 
   // Not `$state`: the tail-follow effect reads it, and a reactive flag would
@@ -336,6 +353,17 @@
     waitingOn === null &&
       ($conversation?.status === "working" || ($stats !== null && manager.freshStats(now))),
   );
+
+  /**
+   * The timeline, with each run of tool calls folded into one row.
+   *
+   * `working` rather than the raw status: it already accounts for a screen
+   * whose figures are still moving, and it is false while an agent waits on an
+   * answer. Only a run the agent is still adding to keeps its newest step
+   * drawn, so the fold closes when the turn ends rather than leaving a finished
+   * call sitting under it.
+   */
+  const rows = $derived(Activity.rows($turns, working));
 
   const questionOnScreen = $derived(
     waitingOn !== null &&
@@ -762,68 +790,94 @@
       </p>
     {/if}
 
+    {#snippet step(turn: TurnRecord)}
+      <Turn
+        role={turn.role}
+        time={Parts.clock(Number(turn.at))}
+        at={Number(turn.at)}
+        marked={Parts.pendingQuestion(turn)}
+      >
+        {#each turn.parts as part, at (at)}
+          {@const key = `${turn.id}:${at}`}
+          <!--
+            Two different facts, and conflating them made the one thing a
+            person had to do impossible.
+
+            `live` is the watch's word: this is the set the agent is blocked
+            on right now. It drives the elapsed time, because only a live set
+            is still waiting on anybody.
+
+            `openable` is the record's: nothing has answered this yet and an
+            agent is running behind it. It drives whether the card can be
+            opened, because the watch is not the only way a question reaches
+            this screen and it is not always the first. A `Blocked` event that
+            never arrived, or one withdrawn while the machine could not read
+            its own pane, left an unanswered question drawn on screen with
+            nothing to tap and no way to say why.
+
+            A card that outlives its question is the cost, and it is the right
+            way round: the machine refuses an answer to a set it is no longer
+            waiting on, and says so. Silence teaches somebody the app is
+            broken; a refusal teaches them what happened.
+          -->
+          {@const asking = "question" in part ? part.question : null}
+          {@const live =
+            waitingOn !== null &&
+            asking !== null &&
+            (asking.question.id as unknown as string) === (waitingOn.id as unknown as string)}
+          {@const openable =
+            asking !== null && asking.answered === null && Boolean($conversation?.binding)}
+          <PartView
+            {part}
+            expanded={opened[key] ?? false}
+            ontoggle={() => toggle(key)}
+            ontool={() => toggle(key)}
+            waiting={live ? Parts.waited(Number(turn.at), now) : null}
+            onexpandquestion={$controls.answer && openable && asking
+              ? () => (stepping = waitingOn ?? asking.question)
+              : null}
+            onopenfile={$controls.read_files
+              ? (asset, name) =>
+                  open(
+                    asset as unknown as string,
+                    name,
+                    "file" in part ? part.file.mime : null,
+                    "file" in part ? part.file.size : null,
+                  )
+              : undefined}
+          />
+        {/each}
+      </Turn>
+    {/snippet}
+
     <Timeline label="Transcript">
-      {#each $turns as turn, index (turn.id)}
-        {#if Parts.newDay($turns[index - 1], turn)}
-          <Label flush>{Parts.day(Number(turn.at))}</Label>
+      {#each rows as row, index (row.key)}
+        {@const first = Activity.leading(row)}
+        {#if Parts.newDay(index > 0 ? Activity.trailing(rows[index - 1]) : undefined, first)}
+          <Label flush>{Parts.day(Number(first.at))}</Label>
         {/if}
-        <Turn
-          role={turn.role}
-          time={Parts.clock(Number(turn.at))}
-          at={Number(turn.at)}
-          marked={Parts.pendingQuestion(turn)}
-        >
-          {#each turn.parts as part, at (at)}
-            {@const key = `${turn.id}:${at}`}
-            <!--
-              Two different facts, and conflating them made the one thing a
-              person had to do impossible.
-
-              `live` is the watch's word: this is the set the agent is blocked
-              on right now. It drives the elapsed time, because only a live set
-              is still waiting on anybody.
-
-              `openable` is the record's: nothing has answered this yet and an
-              agent is running behind it. It drives whether the card can be
-              opened, because the watch is not the only way a question reaches
-              this screen and it is not always the first. A `Blocked` event that
-              never arrived, or one withdrawn while the machine could not read
-              its own pane, left an unanswered question drawn on screen with
-              nothing to tap and no way to say why.
-
-              A card that outlives its question is the cost, and it is the right
-              way round: the machine refuses an answer to a set it is no longer
-              waiting on, and says so. Silence teaches somebody the app is
-              broken; a refusal teaches them what happened.
-            -->
-            {@const asking = "question" in part ? part.question : null}
-            {@const live =
-              waitingOn !== null &&
-              asking !== null &&
-              (asking.question.id as unknown as string) === (waitingOn.id as unknown as string)}
-            {@const openable =
-              asking !== null && asking.answered === null && Boolean($conversation?.binding)}
-            <PartView
-              {part}
-              expanded={opened[key] ?? false}
-              ontoggle={() => toggle(key)}
-              ontool={() => toggle(key)}
-              waiting={live ? Parts.waited(Number(turn.at), now) : null}
-              onexpandquestion={$controls.answer && openable && asking
-                ? () => (stepping = waitingOn ?? asking.question)
-                : null}
-              onopenfile={$controls.read_files
-                ? (asset, name) =>
-                    open(
-                      asset as unknown as string,
-                      name,
-                      "file" in part ? part.file.mime : null,
-                      "file" in part ? part.file.size : null,
-                    )
-                : undefined}
+        {#if row.kind === "turn"}
+          {@render step(row.turn)}
+        {:else}
+          <!--
+            The fold carries the run's own timestamp, so the timeline still
+            reads as a clock. What it opens is drawn under it rather than
+            inside it: a step is a turn, and a turn nested in a turn loses the
+            node and the time that make it one.
+          -->
+          <Turn role="agent" time={Parts.clock(Number(first.at))} at={Number(first.at)}>
+            <ToolFold
+              name={Activity.label(row.run)}
+              detail={Activity.detail(row.run)}
+              status={Activity.status(row.run)}
+              expanded={opened[row.key] ?? false}
+              onclick={() => toggle(row.key)}
             />
+          </Turn>
+          {#each Activity.shown(row.run, opened[row.key] ?? false) as folded (folded.id)}
+            {@render step(folded)}
           {/each}
-        </Turn>
+        {/if}
       {/each}
     </Timeline>
 

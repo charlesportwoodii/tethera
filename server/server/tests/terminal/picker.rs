@@ -49,7 +49,7 @@ fn picker() -> Picker {
 // and pressing Enter drives both pickers, measured on each.
 #[test]
 fn a_choice_moves_to_its_row_and_takes_it() {
-    let steps = picker().steps(&[ask(&["Rewrite", "Register"])], &[Answer::Choice(1)])
+    let steps = picker().steps(&[ask(&["Rewrite", "Register"])], &[Answer::Choice(1)], None)
         .expect("a second choice");
 
     assert_eq!(pressed(&steps), vec!["Down", "Enter"]);
@@ -62,7 +62,7 @@ fn a_choice_moves_to_its_row_and_takes_it() {
 fn a_set_is_answered_one_question_after_another() {
     let asks = vec![ask(&["SQLite", "Postgres"]), ask(&["8080", "9090"])];
     let steps =
-        picker().steps(&asks, &[Answer::Choice(0), Answer::Choice(1)]).expect("both answered");
+        picker().steps(&asks, &[Answer::Choice(0), Answer::Choice(1)], None).expect("both answered");
 
     assert_eq!(pressed(&steps), vec!["Enter", "Down", "Enter"]);
 }
@@ -74,7 +74,7 @@ fn a_multi_select_toggles_each_row_and_then_moves_on() {
     let mut multi = ask(&["Drop the badge", "Close the gap", "Rename the widget"]);
     multi.multi_select = true;
 
-    let steps = picker().steps(&[multi], &[Answer::Multi(vec![0, 2])]).expect("two toggled");
+    let steps = picker().steps(&[multi], &[Answer::Multi(vec![0, 2])], None).expect("two toggled");
 
     assert_eq!(pressed(&steps), vec!["Char('1')", "Char('3')", "Right"]);
 }
@@ -87,6 +87,7 @@ fn free_text_selects_the_row_after_the_options_then_types() {
     let steps = picker().steps(
         &[ask(&["Widget", "Gadget"])],
         &[Answer::Text("Sprocket".into())],
+        None,
     )
     .expect("free text");
 
@@ -102,16 +103,16 @@ fn free_text_selects_the_row_after_the_options_then_types() {
 fn a_set_answered_with_the_wrong_number_of_answers_is_refused() {
     let asks = vec![ask(&["SQLite", "Postgres"]), ask(&["8080", "9090"])];
 
-    assert!(picker().steps(&asks, &[Answer::Choice(0)]).is_err());
-    assert!(picker().steps(&asks, &[]).is_err());
+    assert!(picker().steps(&asks, &[Answer::Choice(0)], None).is_err());
+    assert!(picker().steps(&asks, &[], None).is_err());
 }
 
 // An option index nobody offered would press a number belonging to a different
 // row — "Type something", or the harness's own "Chat about this".
 #[test]
 fn an_option_that_was_never_offered_is_refused() {
-    assert!(picker().steps(&[ask(&["Rewrite", "Register"])], &[Answer::Choice(2)]).is_err());
-    assert!(picker().steps(&[ask(&["Rewrite", "Register"])], &[Answer::Choice(99)]).is_err());
+    assert!(picker().steps(&[ask(&["Rewrite", "Register"])], &[Answer::Choice(2)], None).is_err());
+    assert!(picker().steps(&[ask(&["Rewrite", "Register"])], &[Answer::Choice(99)], None).is_err());
 }
 
 // The shape of the answer has to match the shape of the question, or the presses
@@ -121,7 +122,7 @@ fn an_answer_of_the_wrong_shape_is_refused() {
     let single = ask(&["Rewrite", "Register"]);
 
     assert!(
-        picker().steps(&[single.clone()], &[Answer::Multi(vec![0, 1])]).is_err(),
+        picker().steps(&[single.clone()], &[Answer::Multi(vec![0, 1])], None).is_err(),
         "several choices for a question that takes one"
     );
 
@@ -129,12 +130,12 @@ fn an_answer_of_the_wrong_shape_is_refused() {
     no_text.allows_free_text = false;
 
     assert!(
-        picker().steps(&[no_text], &[Answer::Text("something".into())]).is_err(),
+        picker().steps(&[no_text], &[Answer::Text("something".into())], None).is_err(),
         "free text for a question that does not take it"
     );
 
     assert!(
-        picker().steps(&[single], &[Answer::Text("   ".into())]).is_err(),
+        picker().steps(&[single], &[Answer::Text("   ".into())], None).is_err(),
         "an answer of nothing at all"
     );
 }
@@ -147,7 +148,7 @@ fn an_answer_of_the_wrong_shape_is_refused() {
 fn a_set_with_one_bad_answer_sends_nothing() {
     let asks = vec![ask(&["SQLite", "Postgres"]), ask(&["8080", "9090"])];
 
-    assert!(picker().steps(&asks, &[Answer::Choice(0), Answer::Choice(7)]).is_err());
+    assert!(picker().steps(&asks, &[Answer::Choice(0), Answer::Choice(7)], None).is_err());
 }
 
 // **A multi-select still toggles by number**, so past the ninth row it still has
@@ -160,7 +161,7 @@ fn a_multi_select_row_beyond_the_number_keys_is_refused() {
     ]);
     many.multi_select = true;
 
-    assert!(picker().steps(&[many], &[Answer::Multi(vec![10])]).is_err());
+    assert!(picker().steps(&[many], &[Answer::Multi(vec![10])], None).is_err());
 }
 
 
@@ -169,7 +170,7 @@ fn a_multi_select_row_beyond_the_number_keys_is_refused() {
 #[test]
 fn the_first_option_is_taken_where_the_cursor_already_is() {
     let ask = choice_of(&["Yes", "No"]);
-    let steps = picker().steps(&[ask], &[Answer::Choice(0)]).expect("steps");
+    let steps = picker().steps(&[ask], &[Answer::Choice(0)], None).expect("steps");
 
     assert_eq!(
         steps,
@@ -183,13 +184,64 @@ fn the_first_option_is_taken_where_the_cursor_already_is() {
 fn a_picker_longer_than_the_number_keys_is_still_answerable() {
     let labels: Vec<String> = (0..12).map(|n| format!("option {n}")).collect();
     let borrowed: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let steps = picker().steps(&[choice_of(&borrowed)], &[Answer::Choice(11)]).expect("steps");
+    let steps = picker().steps(&[choice_of(&borrowed)], &[Answer::Choice(11)], None).expect("steps");
 
     assert_eq!(steps.len(), 12, "eleven moves and one Enter");
     assert_eq!(
         steps.last(),
         Some(&TerminalInput::Key { key: Key::Enter, mods: Mods::NONE })
     );
+}
+
+// A number key toggles, measured on a live picker. So a row the operator already
+// ticked at the machine and the phone also chose must not be pressed: pressing it
+// would clear the very row that was wanted.
+#[test]
+fn a_row_already_ticked_is_left_alone() {
+    let mut multi = ask(&["Drop the badge", "Close the gap", "Rename the widget"]);
+    multi.multi_select = true;
+
+    let steps = picker()
+        .steps(
+            &[multi],
+            &[Answer::Multi(vec![0, 1])],
+            Some(&[vec![true, false, false]]),
+        )
+        .expect("a multi-select set is answerable");
+
+    assert_eq!(pressed(&steps), vec!["Char('2')", "Right"]);
+}
+
+// The other half of the same rule: a row that is ticked and was not chosen has to
+// be cleared, or the answer sent is not the answer given.
+#[test]
+fn a_ticked_row_that_was_not_chosen_is_cleared() {
+    let mut multi = ask(&["Drop the badge", "Close the gap", "Rename the widget"]);
+    multi.multi_select = true;
+
+    let steps = picker()
+        .steps(
+            &[multi],
+            &[Answer::Multi(vec![0])],
+            Some(&[vec![true, true, false]]),
+        )
+        .expect("a multi-select set is answerable");
+
+    assert_eq!(pressed(&steps), vec!["Char('2')", "Right"]);
+}
+
+// No observation means no delta to take. This is the records-derived path, and it
+// must behave exactly as it did before ticks could be read at all.
+#[test]
+fn without_an_observation_every_chosen_row_is_pressed() {
+    let mut multi = ask(&["Drop the badge", "Close the gap", "Rename the widget"]);
+    multi.multi_select = true;
+
+    let steps = picker()
+        .steps(&[multi], &[Answer::Multi(vec![0, 2])], None)
+        .expect("a multi-select set is answerable");
+
+    assert_eq!(pressed(&steps), vec!["Char('1')", "Char('3')", "Right"]);
 }
 
 fn choice_of(labels: &[&str]) -> Ask {
