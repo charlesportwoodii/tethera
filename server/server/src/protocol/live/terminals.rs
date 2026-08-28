@@ -183,6 +183,13 @@ impl LiveTerminals {
             named.push(capability::TERMINAL_INPUT);
         }
 
+        // A third fact about attaching, and the one a client has to be told
+        // rather than left to discover: both backends attach, and only one of
+        // them is showing the program's own bytes.
+        if self.backend.can_stream() {
+            named.push(capability::TERMINAL_STREAMED);
+        }
+
         // Asked of the backend rather than inferred from attach. The two were
         // the same question while only one backend could attach; they are not
         // the same question now, and reading one off the other would quietly

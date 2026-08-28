@@ -146,3 +146,23 @@ fn typed_text_and_a_key_chord_are_different_frames() {
         .expect("encode")
     );
 }
+
+/// The bit values are a contract with a table the client hand-writes.
+///
+/// `Mods` crosses to TypeScript as a bare number, so ts-rs carries the type and
+/// nothing carries the meaning of the bits. The other half of the contract is
+/// `MOD` in `client/src/console/components/KeyBar/KeyBar.types.ts`, and the two
+/// disagreeing is silent: a `^C` cap sent as 4 arrives as a modifier the server
+/// recognises, applies, and encodes — so the pane receives a real keypress that
+/// is the wrong one. That is why this pins the numbers rather than the names.
+///
+/// The values are xterm's, which `PtyKeys::modifier` already encodes as
+/// `1 + shift + 2*alt + 4*ctrl`.
+#[test]
+fn modifier_bits_match_the_client_table() {
+    assert_eq!(Mods::NONE.0, 0);
+    assert_eq!(Mods::SHIFT.0, 1);
+    assert_eq!(Mods::ALT.0, 2);
+    assert_eq!(Mods::CTRL.0, 4);
+    assert_eq!(Mods::META.0, 8);
+}

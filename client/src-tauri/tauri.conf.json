@@ -48,7 +48,6 @@
     },
     "category": "SocialNetworking",
     "createUpdaterArtifacts": true,
-    "resources": ["resources/i18n/*"],
     "active": true,
     "targets": [
       "app",

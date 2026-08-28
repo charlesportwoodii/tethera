@@ -154,9 +154,22 @@ pub struct Mods(pub u8);
 
 impl Mods {
     pub const NONE: Mods = Mods(0);
-    pub const CTRL: Mods = Mods(1 << 0);
+    /// xterm's bit order, which is also the order the client's `MOD` table
+    /// hand-writes. `Mods` reaches TypeScript as a bare number, so ts-rs carries
+    /// the type and nothing carries the meaning of the bits — the two tables
+    /// agreeing is the only thing that makes a cap on a phone mean what it says.
+    ///
+    /// They did not agree, and the failure had no symptom that pointed here: a
+    /// `^C` cap sent `4`, this read it as `SHIFT`, and the pane received a
+    /// literal `C`. A modifier that is misread is still a modifier, so every
+    /// layer below encodes it happily.
+    ///
+    /// `PtyKeys::modifier` builds the same order into xterm's parameter as
+    /// `1 + shift + 2*alt + 4*ctrl`.
+    pub const SHIFT: Mods = Mods(1 << 0);
     pub const ALT: Mods = Mods(1 << 1);
-    pub const SHIFT: Mods = Mods(1 << 2);
+    pub const CTRL: Mods = Mods(1 << 2);
+    pub const META: Mods = Mods(1 << 3);
 
     pub fn contains(self, other: Mods) -> bool {
         self.0 & other.0 == other.0

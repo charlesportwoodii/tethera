@@ -503,6 +503,22 @@
         <p class="note">Not following. Anything typed will not arrive.</p>
       {/if}
 
+      <!--
+        Said once, above the pane, rather than left to be discovered. This
+        machine re-reads the screen on a timer instead of carrying the program's
+        own bytes, so a program that repaints in place is appended to rather than
+        redrawn — somebody who opens an editor here watches it pile up screen
+        after screen and concludes the app is broken. The sentence is the whole
+        difference between that and knowing what you are looking at.
+      -->
+      {#if !$controls.streamed}
+        <p class="note">
+          This machine samples the screen rather than following it, so there is no cursor and a
+          full-screen program — an editor, a pager, top — will pile up instead of redrawing.
+          Commands and their output are what this shows.
+        </p>
+      {/if}
+
       {#if $controls.lines_view}
         <div class="row">
           {#each READINGS as reading (reading.id)}

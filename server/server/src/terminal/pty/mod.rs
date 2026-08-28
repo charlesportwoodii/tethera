@@ -17,6 +17,7 @@ use tethera_common::traits::{AgentTrait, TerminalBackendTrait};
 use crate::backend::{BackendError, BackendTree};
 use crate::terminal::keys::KeyEncoder;
 use crate::terminal::registry::PaneRegistry;
+use crate::terminal::source::PaneSource;
 
 /// A terminal backend over ptys this process owns.
 ///
@@ -310,7 +311,7 @@ impl TerminalBackendTrait for PtyBackend {
         // Adopted before this returns, so emulation starts at the pane's first
         // byte. Waiting for an attach would leave the shell's own banner and
         // prompt with nowhere to go.
-        self.registry.adopt(id.clone(), io);
+        self.registry.adopt(id.clone(), io, PaneSource::Streamed);
 
         let entry = Entry {
             pty,

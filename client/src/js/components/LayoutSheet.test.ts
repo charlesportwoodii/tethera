@@ -44,6 +44,7 @@ const ALL: TerminalControls = {
   attach: true,
   input: true,
   scrollback: true,
+  streamed: true,
   open: true,
   split: true,
   close: true,

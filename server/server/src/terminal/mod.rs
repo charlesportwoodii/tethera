@@ -23,6 +23,7 @@ mod pen;
 mod pty;
 mod registry;
 mod screen;
+mod source;
 mod styles;
 
 pub use buffer::Buffer;
@@ -42,4 +43,5 @@ pub use prompt::PromptDetector;
 pub use pty::{PtyBackend, PtyPane};
 pub use registry::{PaneEmulator, PaneRegistry};
 pub use screen::Screen;
+pub use source::PaneSource;
 pub use styles::StyleTable;

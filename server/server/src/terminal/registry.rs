@@ -14,6 +14,7 @@ use crate::terminal::emulator::Emulator;
 use crate::terminal::event::PaneEvent;
 use crate::terminal::frames::FrameBuilder;
 use crate::terminal::io::PaneIo;
+use crate::terminal::source::PaneSource;
 use crate::terminal::styles::StyleTable;
 
 type Live = Arc<Mutex<HashMap<PaneId, Arc<PaneEmulator>>>>;
@@ -28,6 +29,9 @@ struct PaneState {
     /// prescribes for a client that has fallen behind.
     epoch: u64,
     closed: Option<CloseReason>,
+    /// Fixed when the pane was adopted, because it is a property of who owns the
+    /// far end and that never changes for a pane's life.
+    source: PaneSource,
 }
 
 /// One pane's emulator, and the wakeup any session attached to it waits on.
@@ -108,9 +112,51 @@ impl PaneEmulator {
     /// harmless.
     pub fn open(&self) -> (TerminalFrame, u64) {
         let state = self.state();
-        let frame = FrameBuilder::snapshot(state.emulator.screen());
+        let frame = Self::observed(&state, FrameBuilder::snapshot(state.emulator.screen()));
 
         (frame, state.epoch)
+    }
+
+    /// Withholds what this pane's source did not observe.
+    ///
+    /// Applied to every frame on the way out rather than inside `FrameBuilder`,
+    /// which is given a screen and has no way to know where the screen came
+    /// from. The emulator is left alone: its cursor is what the replay needs to
+    /// keep writing in the right place, and only the report of it is a claim.
+    fn observed(state: &PaneState, frame: TerminalFrame) -> TerminalFrame {
+        if state.source.observes_cursor() {
+            return frame;
+        }
+
+        match frame {
+            TerminalFrame::Snapshot {
+                cols,
+                rows,
+                styles,
+                rows_data,
+                cursor: _,
+                alt_screen,
+                scrollback_len,
+            } => TerminalFrame::Snapshot {
+                cols,
+                rows,
+                styles,
+                rows_data,
+                cursor: None,
+                alt_screen,
+                scrollback_len,
+            },
+            TerminalFrame::Damage {
+                styles,
+                rows_data,
+                cursor: _,
+            } => TerminalFrame::Damage {
+                styles,
+                rows_data,
+                cursor: None,
+            },
+            other => other,
+        }
     }
 
     /// The next frame a session at `seen` is owed, and the epoch it moves to.
@@ -125,7 +171,7 @@ impl PaneEmulator {
         // forever, each sending a full snapshot every budget tick with no output
         // at all.
         if state.epoch != seen {
-            let frame = FrameBuilder::snapshot(state.emulator.screen());
+            let frame = Self::observed(&state, FrameBuilder::snapshot(state.emulator.screen()));
 
             return (Some(frame), state.epoch);
         }
@@ -142,6 +188,7 @@ impl PaneEmulator {
                 }
 
                 let epoch = state.epoch;
+                let frame = Self::observed(&state, frame);
 
                 (Some(frame), epoch)
             }
@@ -192,13 +239,14 @@ impl PaneRegistry {
     /// Emulation starts now rather than at the first attach, so a pane's
     /// scrollback is complete from its first byte and nothing has to be buffered
     /// waiting for a client that may never arrive.
-    pub fn adopt(&self, pane: PaneId, io: PaneIo) {
+    pub fn adopt(&self, pane: PaneId, io: PaneIo, source: PaneSource) {
         let (revision, _) = watch::channel(0);
         let shared = Arc::new(PaneEmulator {
             state: Mutex::new(PaneState {
                 emulator: Emulator::new(io.size),
                 epoch: 0,
                 closed: None,
+                source,
             }),
             revision,
             input: io.input.clone(),

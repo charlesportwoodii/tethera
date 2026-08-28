@@ -17,6 +17,13 @@ pub struct TerminalControls {
     pub attach: bool,
     pub input: bool,
     pub scrollback: bool,
+    /// Whether a pane's frames are the program's own bytes.
+    ///
+    /// False means the screen is sampled on a timer, so a full-screen program
+    /// piles up instead of redrawing and there is no cursor to draw. The screen
+    /// says so once, in a line beside the pane, rather than leaving somebody to
+    /// conclude the app is broken.
+    pub streamed: bool,
     pub open: bool,
     pub split: bool,
     pub close: bool,

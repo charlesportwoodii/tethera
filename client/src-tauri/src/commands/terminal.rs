@@ -194,6 +194,7 @@ pub(crate) async fn terminal_controls(
         attach: has(capability::TERMINAL_ATTACH),
         input: has(capability::TERMINAL_INPUT),
         scrollback: has(capability::TERMINAL_SCROLLBACK),
+        streamed: has(capability::TERMINAL_STREAMED),
         open: has(capability::PANE_OPEN),
         split: has(capability::PANE_SPLIT),
         close: has(capability::PANE_CLOSE),

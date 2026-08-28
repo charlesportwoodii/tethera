@@ -19,7 +19,11 @@
 
   // Controlled by the caller. Local state here would fight whatever arrives from
   // the gateway on the next frame.
-  const empty = $derived(value.trim().length === 0);
+  //
+  // A staged file is a message on its own. Requiring words beside it makes a
+  // screenshot unsendable until something is typed to accompany it, which is
+  // the one thing a screenshot is usually sent instead of.
+  const empty = $derived(value.trim().length === 0 && attachments.length === 0);
   const uploading = $derived(attachments.some((a) => typeof a.progress === "number"));
   const blocked = $derived(disabled || busy || uploading);
 

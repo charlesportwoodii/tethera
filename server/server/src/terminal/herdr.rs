@@ -12,6 +12,7 @@ use crate::terminal::delta::{Advance, OutputDelta};
 use crate::terminal::event::PaneEvent;
 use crate::terminal::io::PaneIo;
 use crate::terminal::registry::PaneRegistry;
+use crate::terminal::source::PaneSource;
 
 /// A herdr pane, read on a timer and fed to an emulator as if it were a stream.
 ///
@@ -106,7 +107,7 @@ impl HerdrSource {
         // never a stall.
         drop(input);
 
-        registry.adopt(pane.clone(), io);
+        registry.adopt(pane.clone(), io, PaneSource::Sampled);
         registry.record_feed(&pane, view, wanted);
 
         tokio::spawn(Self::pump(backend, registry, gate, pane, view, events));

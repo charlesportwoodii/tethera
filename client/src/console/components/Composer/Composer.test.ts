@@ -14,6 +14,33 @@ describe("Composer", () => {
     expect(getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
+  it("sends a landed attachment with no words at all", async () => {
+    const onsend = vi.fn();
+    const { getByRole } = render(Composer, {
+      props: {
+        value: "",
+        onsend,
+        onattach: () => {},
+        attachments: [{ id: "a", name: "shot.png" }],
+      },
+    });
+    // A screenshot is usually sent instead of a sentence, not alongside one.
+    await userEvent.click(getByRole("button", { name: "Send" }));
+    expect(onsend).toHaveBeenCalledWith("");
+  });
+
+  it("still holds a wordless send while its only attachment is rising", () => {
+    const { getByRole } = render(Composer, {
+      props: {
+        value: "",
+        onattach: () => {},
+        attachments: [{ id: "a", name: "shot.png", progress: 0.4 }],
+      },
+    });
+    // Nothing to send yet: the message would name a file the host does not have.
+    expect(getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
   it("sends what is in the field", async () => {
     const onsend = vi.fn();
     const { getByRole } = render(Composer, { props: { value: "1", onsend } });

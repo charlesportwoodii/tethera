@@ -43,6 +43,20 @@ impl TerminalBackend {
         true
     }
 
+    /// Whether a pane's frames are the program's own bytes.
+    ///
+    /// Not the same question as `can_attach`, which is true for both. herdr
+    /// publishes no per-pane stream, so its panes are polled and the difference
+    /// between two reads is replayed — which carries the cells and loses
+    /// everything a repaint in place depends on. A pty is the program's own
+    /// bytes, in order, with nothing reconstructed.
+    ///
+    /// Advertised rather than inferred from the lines view, which happens to
+    /// have the same answer today for an unrelated reason.
+    pub fn can_stream(&self) -> bool {
+        matches!(self, Self::Pty(_))
+    }
+
     /// Whether this backend has a layout engine to split.
     ///
     /// Separate from `can_attach`, which used to stand in for it back when only

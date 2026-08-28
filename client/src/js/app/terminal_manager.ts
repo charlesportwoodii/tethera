@@ -24,6 +24,7 @@ const NOTHING: TerminalControls = {
   attach: false,
   input: false,
   scrollback: false,
+  streamed: false,
   open: false,
   split: false,
   close: false,
