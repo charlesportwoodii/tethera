@@ -37,6 +37,7 @@ fn pane(name: &str) -> Pane {
         foreground_command: None,
         conversation: None,
         agent: None,
+        streamed: false,
     }
 }
 

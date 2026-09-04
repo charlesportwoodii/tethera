@@ -19,6 +19,10 @@ serde = { version = "^1", features = ["derive"] }
 serde_bytes = { version = "^0.11" }
 serde_json = { version = "^1" }
 toml = { version = "^0.9" }
+# Comment-preserving TOML, for the one file tethera edits that it does not own:
+# herdr's config.toml. Plain `toml` round-trips the values and discards every
+# comment the operator wrote, which on somebody else's config is vandalism.
+toml_edit = { version = "^0.25" }
 postcard = { version = "^1.1", features = ["use-std"] }
 ts-rs = { version = "^12.0" }
 tokio = { version = "^1.53", features = [

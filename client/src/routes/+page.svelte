@@ -1,15 +1,23 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { Parts } from "$managers/parts";
   import { invoke } from "@tauri-apps/api/core";
-  import { Button, ConnDot, Icon, NavBar, Tree, TreeNode, TreeTwig } from "$console";
+  import { Button, Icon, Label, NavBar, ServerTile } from "$console";
   import { ServerManager } from "$managers/server_manager";
   import { DeepLink } from "$managers/deep_link";
   import { Conversations } from "$managers/conversations";
+  import { Fleet } from "$managers/fleet";
   import ConversationGlyph from "$components/ConversationGlyph.svelte";
   import type { Conversation } from "$bindings/Conversation";
   import type { ServerRow } from "$bindings/ServerRow";
+
+  /**
+   * How many sessions the column under the fleet shows.
+   *
+   * The fleet is what this screen is for; the sessions below it are a way in,
+   * not an index. The machine page pages the rest properly.
+   */
+  const SESSIONS_SHOWN = 5;
 
   const manager = new ServerManager(invoke);
   const rows = manager.rows;
@@ -17,6 +25,9 @@
 
   let link: DeepLink | null = null;
   let unfollow: (() => void) | null = null;
+
+  const waiting = $derived(Fleet.waiting($rows));
+  const sessions = $derived(Fleet.recent($rows, SESSIONS_SHOWN));
 
   onMount(() => {
     void start();
@@ -50,13 +61,29 @@
     return quiet === 0 ? paired : `${paired} · ${quiet} not answering`;
   }
 
-  // ConnDot has no "unknown" state, so a row that has not settled shows words
-  // instead of a dot rather than claiming a route nothing has measured.
+  /**
+   * How long a machine has been quiet, for the tile that replaced its route.
+   *
+   * Absent while the machine is answering: the round trip is the live fact
+   * there, and a last-seen date beside it would read as a second measurement.
+   */
+  function lastSeen(row: ServerRow): string | null {
+    const at = row.entry.last_seen_at;
+
+    if (row.link.kind !== "offline" || at === null || at === undefined) {
+      return null;
+    }
+
+    const days = Math.floor((Date.now() - Number(at)) / 86_400_000);
+
+    return days > 0 ? `${days}d` : "today";
+  }
+
   /**
    * Straight into the conversation from the list.
    *
-   * The twig already says which one it is, so making the person open the
-   * machine first to reach the same row is a step that answers nothing.
+   * The row already says which one it is, so making the person open the machine
+   * first to reach the same row is a step that answers nothing.
    */
   function read(row: ServerRow, held: Conversation): void {
     const server = encodeURIComponent(row.entry.server.id as unknown as string);
@@ -101,79 +128,92 @@
     {/snippet}
   </NavBar>
 
-  <Tree label="Servers">
-    {#each $rows as row (row.entry.server.id)}
-      <TreeNode
-        dim={row.link.kind === "offline"}
-        branches={row.entry.conversations.length > 0}
-        spaced
-      >
-        <!-- The console draws `idle` as a grey hollow ring, which is the mark
-             for a machine that did not answer. On the column somebody scans
-             down, a machine answering in 5 ms and one that has been quiet for a
-             day were the same shape. -->
-        {#snippet glyph()}
-          <ConversationGlyph
-            state={row.link.kind === "offline" ? "offline" : "idle"}
-            bg="var(--tc-surface)"
-          />
-        {/snippet}
+  <!-- Absent rather than empty when nothing is waiting. A band that says
+       "nothing needs you" is a row read every day to learn nothing, and it
+       pushes the fleet down to earn it.
 
-        <div class="line">
-          <button class="row" onclick={() => open(row)}>
-            <strong class="name">{row.entry.server.label}</strong>
-            <span class="meta">{row.entry.server.os} · {row.entry.server.arch}</span>
+       Read-only, and it stays that way until a conversation carries its pending
+       question on the wire. Answering needs the question's id and fingerprint,
+       and the fingerprint is what the machine checks to refuse a stale answer —
+       so there is nothing here to invent one from. -->
+  {#if waiting.length > 0}
+    <Label flush rule tone="urgent" count={waiting.length}>Needs you</Label>
 
-            {#if row.refusal}
-              <span class="meta refused">would not accept this device</span>
-            {:else if row.link.kind !== "unknown"}
-              <ConnDot link={row.link.kind} rttMs={row.link.rtt_ms} />
-            {:else}
-              <span class="meta">finding a route…</span>
-            {/if}
-          </button>
+    {#each waiting as held (held.conversation.id)}
+      <button class="ask" type="button" onclick={() => read(held.row, held.conversation)}>
+        <span class="ask__who">
+          <ConversationGlyph state={Conversations.glyph(held.conversation, true)} />
+          <b>{held.row.entry.server.label}</b>
+          <span class="ask__meta">{Conversations.meta(held.conversation)}</span>
+          {#if Conversations.age(held.conversation)}
+            <em>{Conversations.age(held.conversation)}</em>
+          {/if}
+        </span>
 
-          <!-- Per server, on the server's own row. A single button at the foot
-               would belong to whichever machine you last thought about, which is
-               not a question this screen can answer. -->
-          <button
-            class="bare start"
-            onclick={() => startOn(row)}
-            aria-label={`New session on ${row.entry.server.label}`}
-          >
-            <Icon name="plus" />
-          </button>
-        </div>
+        {#if Conversations.preview(held.conversation)}
+          <span class="ask__q">{Conversations.preview(held.conversation)}</span>
+        {/if}
 
-        <!-- Remembered when the machine is not answering, which is the one
-             useful thing on an otherwise empty row: what was running when it
-             went quiet. -->
-        {#each row.entry.conversations as held (held.id)}
-          <TreeTwig>
-            {#snippet glyph()}
-              <ConversationGlyph state={Conversations.glyph(held, row.link.kind !== "offline")} />
-            {/snippet}
-            <button class="open" type="button" onclick={() => read(row, held)}>
-              <div class="twig">
-                <b>{Conversations.title(held)}</b>
-                {#if Conversations.age(held)}<span class="age">{Conversations.age(held)}</span>{/if}
-              </div>
-              <div class="meta">{Conversations.meta(held)}</div>
-              {#if held.preview}
-                <div class="said">“{Parts.plain(held.preview)}”</div>
-              {/if}
-            </button>
-          </TreeTwig>
-        {/each}
-      </TreeNode>
+        <span class="ask__src">{Conversations.title(held.conversation)}</span>
+      </button>
     {/each}
-  </Tree>
+  {/if}
 
-  <!-- The scan mark in the NavBar is the same action, but it is small and sits
-       against the status bar. Pairing a second machine is a first-class thing to
-       do from this screen, so it gets a control that reads as one. -->
+  <Label flush rule count={$rows.length}>Fleet</Label>
+
+  <div class="tiles">
+    {#each $rows as row (row.entry.server.id)}
+      <ServerTile
+        label={row.entry.server.label}
+        os={row.entry.server.os}
+        arch={row.entry.server.arch}
+        link={row.link.kind}
+        rttMs={row.link.rtt_ms}
+        lastSeen={lastSeen(row)}
+        refusal={row.refusal ? "would not accept this device" : null}
+        states={Fleet.states(row)}
+        summary={Fleet.sentence(row)}
+        attention={Fleet.attention(row)}
+        onopen={() => open(row)}
+        onstart={() => startOn(row)}
+      >
+        <!-- The app's own mark, not the console's. `ConversationGlyph` draws an
+             idle session filled, where `StatusGlyph` draws it as a grey hollow
+             ring — which is this screen's mark for a machine that is not
+             answering. Left to the default, a healthy session read as
+             unreachable in the tile and as alive in the row beneath it. -->
+        {#snippet glyph(state, size)}
+          <ConversationGlyph {state} {size} />
+        {/snippet}
+      </ServerTile>
+    {/each}
+  </div>
+
+  <!-- Sessions rather than Recent. The sweep asks for what is bound to a pane,
+       so this column is what is running now, not what happened lately. -->
+  {#if sessions.length > 0}
+    <Label flush rule count={sessions.length}>Sessions</Label>
+
+    <div class="rows">
+      {#each sessions as held (held.conversation.id)}
+        <button class="line" type="button" onclick={() => read(held.row, held.conversation)}>
+          <ConversationGlyph
+            state={Conversations.glyph(held.conversation, held.row.link.kind !== "offline")}
+          />
+          <span class="line__t">
+            <b>{Conversations.title(held.conversation)}</b>
+            <span>{held.row.entry.server.label} · {Conversations.meta(held.conversation)}</span>
+          </span>
+          {#if Conversations.age(held.conversation)}
+            <span class="line__age">{Conversations.age(held.conversation)}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="foot">
-    <Button icon="scan" onclick={() => goto("/pair")}>Pair another server</Button>
+    <Button icon="scan" variant="quiet" onclick={() => goto("/pair")}>Pair another server</Button>
     <Button variant="quiet" disabled={$sweeping} onclick={() => manager.sweep()}>
       {$sweeping ? "Checking…" : "Refresh"}
     </Button>
@@ -218,100 +258,137 @@
     cursor: pointer;
   }
 
-  .bare,
-  .row {
-    background: none;
+  .tiles {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 var(--tc-pad);
+  }
+
+  .ask {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: calc(100% - var(--tc-pad) * 2);
+    margin: 0 var(--tc-pad) 10px;
+    padding: 12px 13px;
+    background: var(--tc-surface-2);
     border: 0;
-    padding: 0;
+    border-radius: var(--tc-r-control);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc-attn) 42%, transparent);
     color: inherit;
-    cursor: pointer;
     font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ask__who {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--tc-ink-3);
+
+    b {
+      color: var(--tc-ink-2);
+      font-weight: 500;
+    }
+
+    em {
+      font-style: normal;
+      margin-left: auto;
+      flex: none;
+    }
+  }
+
+  .ask__meta {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ask__q {
+    font-size: 14px;
+    color: var(--tc-ink);
+    line-height: 1.4;
+  }
+
+  .ask__src {
+    font-family: var(--tc-mono);
+    font-size: 9.5px;
+    color: var(--tc-ink-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .rows {
+    display: flex;
+    flex-direction: column;
+    padding: 0 var(--tc-pad);
   }
 
   .line {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
+    gap: 11px;
     width: 100%;
-  }
-
-  .row {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 3px;
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-  }
-
-  // A finger, not a cursor. The mark is ~18px; without a target built around it
-  // the control is a quarter of the 48dp Android asks for and misses more often
-  // than it hits.
-  //
-  // Sized with padding rather than negative margins: pulling the box outside the
-  // node's content area put it where the tap never arrived, which reads exactly
-  // like a dead button.
-  .start {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 48px;
-    height: 48px;
-    color: var(--tc-ink-3);
-  }
-
-  .name {
-    font-family: var(--tc-mono);
-    font-size: 16px;
-    letter-spacing: -0.02em;
-  }
-
-  .meta {
-    font-family: var(--tc-mono);
-    font-size: 10px;
-    color: var(--tc-ink-3);
-  }
-
-  .refused {
-    color: var(--tc-warn, var(--tc-ink-2));
-  }
-
-  .open {
-    display: block;
-    width: 100%;
-    padding: 0;
-    border: none;
+    padding: 11px 2px;
     background: none;
-    text-align: left;
+    border: 0;
+    border-bottom: 1px solid var(--tc-rule);
     color: inherit;
     font: inherit;
-  }
+    text-align: left;
+    cursor: pointer;
 
-  .twig {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-
-    b {
-      font-size: 13.5px;
-      font-weight: 600;
-      letter-spacing: -0.015em;
+    &:last-child {
+      border-bottom: 0;
     }
   }
 
-  .age {
+  .line__t {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    b {
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    span {
+      font-family: var(--tc-mono);
+      font-size: 9.5px;
+      color: var(--tc-ink-3);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  .line__age {
+    flex: none;
+    margin-top: 2px;
     font-family: var(--tc-mono);
     font-size: 10px;
     color: var(--tc-ink-3);
-    margin-left: auto;
   }
 
-  .said {
-    margin-top: 3px;
-    font-size: 12.5px;
-    color: var(--tc-ink-2);
-    line-height: 1.4;
+  .ask,
+  .line,
+  .tap {
+    -webkit-tap-highlight-color: transparent;
   }
 
   .foot {

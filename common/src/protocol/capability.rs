@@ -48,27 +48,6 @@ pub const RECENT_CWDS: &str = "recent_cwds";
 pub const TERMINAL_ATTACH: &str = "terminal_attach";
 pub const TERMINAL_INPUT: &str = "terminal_input";
 pub const TERMINAL_SCROLLBACK: &str = "terminal_scrollback";
-/// Whether a pane's output is the program's own bytes rather than a periodic
-/// re-read of its screen.
-///
-/// Absent means the screen is sampled: it is polled on a timer and the
-/// difference replayed into an emulator. That reconstruction carries the cells
-/// and nothing else, so a program that repaints in place — an editor, a pager, a
-/// process monitor — is appended to rather than redrawn, and no cursor is
-/// reported at all.
-///
-/// Advertised so a client can say which of the two it is showing. Somebody who
-/// opens an editor and watches it pile up screen after screen concludes the app
-/// is broken; the same person told the pane is sampled knows what they are
-/// looking at.
-pub const TERMINAL_STREAMED: &str = "terminal_streamed";
-/// Whether this machine can return a pane's output with its wrapping removed.
-///
-/// A phone reading a pane laid out for a desk depends on it, and a backend that
-/// only publishes an already-wrapped screen cannot offer it. Advertised so the
-/// view toggle is absent rather than present and silently giving back the other
-/// view.
-pub const TERMINAL_LINES_VIEW: &str = "terminal_lines_view";
 /// Whether this machine will say where a tab's panes sit.
 ///
 /// A backend that owns no geometry cannot answer it, and a client that asked

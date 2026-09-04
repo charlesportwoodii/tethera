@@ -78,6 +78,77 @@ impl Downlink {
     }
 }
 
+/// One message on the uplink.
+///
+/// Framed for the same reason the downlink is: this direction carries the pty's
+/// bytes *and* the geometry the desk resized the pane to, and a stream has no
+/// message boundaries to tell them apart. Without it the server's emulator keeps
+/// the geometry from the greeting for the pane's whole life, because the shim
+/// resizes its pty when the desk changes and has no way to say so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Uplink {
+    /// The pty's output, exactly as the program produced it.
+    ///
+    /// Unfiltered, unlike what reaches the pane: the server is not a guest in
+    /// anybody's terminal, so a resize request in the stream is information
+    /// rather than a hazard.
+    Output(Vec<u8>),
+    /// The pty is now this size, because the terminal the shim sits in is.
+    ///
+    /// An observation, not a request. A claim travels the other way.
+    Resized { cols: u16, rows: u16 },
+}
+
+impl Uplink {
+    pub const OUTPUT: u8 = 0;
+    pub const RESIZED: u8 = 1;
+    pub const HEADER_BYTES: usize = 5;
+
+    /// Larger than the downlink's, because this carries screenfuls rather than
+    /// keystrokes. Still bounded: the far end is another process.
+    pub const MAX_PAYLOAD: usize = 256 * 1024;
+
+    pub fn encode(&self) -> Vec<u8> {
+        let (tag, payload) = match self {
+            Self::Output(bytes) => (Self::OUTPUT, bytes.clone()),
+            Self::Resized { cols, rows } => {
+                let mut payload = Vec::with_capacity(4);
+                payload.extend_from_slice(&cols.to_be_bytes());
+                payload.extend_from_slice(&rows.to_be_bytes());
+
+                (Self::RESIZED, payload)
+            }
+        };
+
+        let mut out = Vec::with_capacity(Self::HEADER_BYTES + payload.len());
+        out.push(tag);
+        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(&payload);
+
+        out
+    }
+
+    /// An unknown tag is `None` rather than an error, so a peer from a newer
+    /// build is skipped rather than fatal.
+    pub fn decode(tag: u8, payload: &[u8]) -> Option<Self> {
+        match tag {
+            Self::OUTPUT => Some(Self::Output(payload.to_vec())),
+            Self::RESIZED if payload.len() >= 4 => Some(Self::Resized {
+                cols: u16::from_be_bytes([payload[0], payload[1]]),
+                rows: u16::from_be_bytes([payload[2], payload[3]]),
+            }),
+            _ => None,
+        }
+    }
+
+    /// The payload length a header names, refused if it is past the cap.
+    pub fn payload_length(header: [u8; Self::HEADER_BYTES]) -> Option<usize> {
+        let len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+
+        (len <= Self::MAX_PAYLOAD).then_some(len)
+    }
+}
+
 /// The local channel a shim reaches this machine's server on.
 ///
 /// A named pipe on Windows and a unix socket elsewhere, rather than a loopback
@@ -130,11 +201,47 @@ impl ShimLink {
     /// move bytes and starting a reactor to do it would be the largest thing in
     /// the process. On Windows a named pipe opens as a file, which is why this
     /// needs no platform crate on either side.
+    /// `ERROR_PIPE_BUSY`. Every instance of the pipe is already connected.
+    ///
+    /// Expected rather than exceptional: a named pipe server holds a fixed
+    /// number of instances and creates the next only after the current one is
+    /// handed off, so a client that dials while the server is between the two is
+    /// refused. A shim opens two channels back to back and loses that race
+    /// routinely — measured, the second dial failed with this while the first
+    /// had just succeeded.
+    #[cfg(windows)]
+    const PIPE_BUSY: i32 = 231;
+
+    /// How long a dial keeps retrying a busy pipe, and how often.
+    ///
+    /// Short, because this covers a server between instances rather than a
+    /// server that is down. A shim that cannot get through gives up and runs the
+    /// shell, and `REDIAL_INTERVAL` is what brings it back later.
+    #[cfg(windows)]
+    const BUSY_ATTEMPTS: u32 = 20;
+    #[cfg(windows)]
+    const BUSY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(25);
+
     #[cfg(windows)]
     pub fn dial(address: &str) -> std::io::Result<(Box<dyn Read + Send>, Box<dyn Write + Send>)> {
         use std::fs::OpenOptions;
 
-        let pipe = OpenOptions::new().read(true).write(true).open(address)?;
+        let mut attempt = 0;
+
+        let pipe = loop {
+            match OpenOptions::new().read(true).write(true).open(address) {
+                Ok(pipe) => break pipe,
+                Err(error)
+                    if error.raw_os_error() == Some(Self::PIPE_BUSY)
+                        && attempt < Self::BUSY_ATTEMPTS =>
+                {
+                    attempt += 1;
+                    std::thread::sleep(Self::BUSY_INTERVAL);
+                }
+                Err(error) => return Err(error),
+            }
+        };
+
         let write = pipe.try_clone()?;
 
         Ok((Box::new(pipe), Box::new(write)))

@@ -1,0 +1,14 @@
+@use "../../tokens/mixins" as *;
+
+.tc-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 14px;
+}
+
+.tc-strip__more {
+  @include mono-label(10px, 0.04em);
+  text-transform: none;
+  margin-left: 1px;
+}

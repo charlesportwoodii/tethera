@@ -1,0 +1,19 @@
+.tc-keystream {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--tc-line);
+  border-radius: var(--tc-r-chip);
+  background: var(--tc-surface);
+  color: var(--tc-ink);
+  font-family: var(--tc-mono);
+  font-size: 13px;
+
+  &::placeholder {
+    color: var(--tc-ink-3);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+  }
+}

@@ -3,9 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use tethera_common::protocol::error::{EntityKind, WireError};
 use tethera_common::protocol::terminal::{CloseReason, RowUpdate, TerminalFrame};
-use tethera_common::protocol::view::PaneView;
 use tethera_common::structs::ids::PaneId;
-use tethera_common::structs::terminal::Size;
 use tokio::sync::{mpsc, watch};
 
 use crate::protocol::live::PaneSession;
@@ -29,9 +27,6 @@ struct PaneState {
     /// prescribes for a client that has fallen behind.
     epoch: u64,
     closed: Option<CloseReason>,
-    /// Fixed when the pane was adopted, because it is a property of who owns the
-    /// far end and that never changes for a pane's life.
-    source: PaneSource,
 }
 
 /// One pane's emulator, and the wakeup any session attached to it waits on.
@@ -112,51 +107,9 @@ impl PaneEmulator {
     /// harmless.
     pub fn open(&self) -> (TerminalFrame, u64) {
         let state = self.state();
-        let frame = Self::observed(&state, FrameBuilder::snapshot(state.emulator.screen()));
+        let frame = FrameBuilder::snapshot(state.emulator.screen());
 
         (frame, state.epoch)
-    }
-
-    /// Withholds what this pane's source did not observe.
-    ///
-    /// Applied to every frame on the way out rather than inside `FrameBuilder`,
-    /// which is given a screen and has no way to know where the screen came
-    /// from. The emulator is left alone: its cursor is what the replay needs to
-    /// keep writing in the right place, and only the report of it is a claim.
-    fn observed(state: &PaneState, frame: TerminalFrame) -> TerminalFrame {
-        if state.source.observes_cursor() {
-            return frame;
-        }
-
-        match frame {
-            TerminalFrame::Snapshot {
-                cols,
-                rows,
-                styles,
-                rows_data,
-                cursor: _,
-                alt_screen,
-                scrollback_len,
-            } => TerminalFrame::Snapshot {
-                cols,
-                rows,
-                styles,
-                rows_data,
-                cursor: None,
-                alt_screen,
-                scrollback_len,
-            },
-            TerminalFrame::Damage {
-                styles,
-                rows_data,
-                cursor: _,
-            } => TerminalFrame::Damage {
-                styles,
-                rows_data,
-                cursor: None,
-            },
-            other => other,
-        }
     }
 
     /// The next frame a session at `seen` is owed, and the epoch it moves to.
@@ -171,7 +124,7 @@ impl PaneEmulator {
         // forever, each sending a full snapshot every budget tick with no output
         // at all.
         if state.epoch != seen {
-            let frame = Self::observed(&state, FrameBuilder::snapshot(state.emulator.screen()));
+            let frame = FrameBuilder::snapshot(state.emulator.screen());
 
             return (Some(frame), state.epoch);
         }
@@ -188,7 +141,6 @@ impl PaneEmulator {
                 }
 
                 let epoch = state.epoch;
-                let frame = Self::observed(&state, frame);
 
                 (Some(frame), epoch)
             }
@@ -207,20 +159,12 @@ pub struct PaneRegistry {
     /// Behind an `Arc` so a pump can hold a `Weak` to it and drop its own entry
     /// when its pane dies, without keeping the registry alive.
     live: Live,
-    /// What each pulled feed was started with, for the backends that pull.
-    ///
-    /// Kept beside the emulators rather than inside them because it describes
-    /// the *source* rather than the pane: a pty pushes its own bytes and never
-    /// records anything here. It exists so a re-attach asking for a different
-    /// view is answered by a new feed instead of being silently ignored.
-    feeds: Mutex<HashMap<PaneId, (PaneView, Size)>>,
 }
 
 impl PaneRegistry {
     pub fn new() -> Self {
         Self {
             live: Arc::new(Mutex::new(HashMap::new())),
-            feeds: Mutex::new(HashMap::new()),
         }
     }
 
@@ -246,7 +190,6 @@ impl PaneRegistry {
                 emulator: Emulator::new(io.size),
                 epoch: 0,
                 closed: None,
-                source,
             }),
             revision,
             input: io.input.clone(),
@@ -262,34 +205,6 @@ impl PaneRegistry {
     /// Whether this registry is emulating the named pane.
     pub fn holds(&self, pane: &PaneId) -> bool {
         self.live().contains_key(pane)
-    }
-
-    /// Records what a pulled feed for this pane was started with.
-    pub fn record_feed(&self, pane: &PaneId, view: PaneView, size: Size) {
-        self.feeds()
-            .insert(pane.clone(), (view, size));
-    }
-
-    /// Whether the feed already running for this pane is the one being asked
-    /// for.
-    ///
-    /// `false` for a pane with no recorded feed, so a backend that pushes its
-    /// own bytes is never mistaken for one that agrees.
-    pub fn feed_matches(&self, pane: &PaneId, view: PaneView, size: Size) -> bool {
-        self.feeds()
-            .get(pane)
-            .is_some_and(|held| *held == (view, size))
-    }
-
-    fn feeds(&self) -> MutexGuard<'_, HashMap<PaneId, (PaneView, Size)>> {
-        self.feeds
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    /// How many sessions are attached to a pane. `None` if it is not emulated.
-    pub fn watchers(&self, pane: &PaneId) -> Option<usize> {
-        self.live().get(pane).map(|shared| shared.watchers())
     }
 
     pub fn attach(&self, pane: &PaneId) -> Result<PaneSession, WireError> {
@@ -321,7 +236,6 @@ impl PaneRegistry {
     /// frame, and the pump's later removal is a no-op because it checks identity.
     pub fn forget(&self, pane: &PaneId) {
         self.live().remove(pane);
-        self.feeds().remove(pane);
     }
 
     /// One page of a pane's own history, with the styles it was drawn in.

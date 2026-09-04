@@ -158,6 +158,8 @@ impl PtyBackend {
             foreground_command: None,
             conversation: None,
             agent: None,
+            // Stamped by the port, which is the only layer that knows.
+            streamed: false,
         }
     }
 
@@ -381,13 +383,22 @@ impl TerminalBackendTrait for PtyBackend {
         entry.pty.write(KeyEncoder::text(text, false))
     }
 
-    /// Types the launch line and presses return.
+    /// Typing the line is the only start this backend has.
     ///
     /// No readiness to report and no session to announce: this backend watches
     /// a byte stream, not an agent lifecycle, so it cannot tell a started agent
     /// from a shell that printed "command not found". `None` says so, and the
     /// caller decides what an unannounced start means.
     fn start_agent(
+        &self,
+        pane_id: &PaneId,
+        spawn: &AgentSpawn,
+    ) -> anyhow::Result<Option<ConversationId>> {
+        self.type_agent_launch(pane_id, spawn)
+    }
+
+    /// Types the launch line and presses return.
+    fn type_agent_launch(
         &self,
         pane_id: &PaneId,
         spawn: &AgentSpawn,

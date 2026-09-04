@@ -1,14 +1,29 @@
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
+use tethera_common::structs::terminal::Size;
 
-use crate::terminal::link::{Downlink, ShimLink};
+use crate::terminal::link::{Downlink, ShimLink, Uplink};
+use crate::terminal::shim_screen::ShimScreen;
 
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+/// One pty writer, shared by everything that types into this pane.
+///
+/// `pub` because the property that matters — a write lands whole or not at all —
+/// is asserted against `Shim::write_whole`, and a test cannot construct the sink
+/// without the type.
+pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedMaster = Arc<Mutex<Box<dyn MasterPty + Send>>>;
+/// The shim's emulator, shared by the thread reading the pty and the thread that
+/// applies a claim: both change what the tracked geometry is.
+type SharedScreen = Arc<Mutex<ShimScreen>>;
+/// The channel to the server, shared by the output thread and the resize thread.
+///
+/// Both write framed messages, and a resize landing inside a chunk of output
+/// would be read as neither. `None` once it has failed or was never dialled.
+type SharedUplink = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
 
 /// A shell wrapped in a pty, inside somebody else's terminal.
 ///
@@ -36,6 +51,14 @@ impl Shim {
     /// directly instead of nesting a second pty.
     pub const MARKER: &'static str = "TETHERA_SHIM";
 
+    /// The name this binary has to be called to run as a shell.
+    ///
+    /// One build, two names: the dispatch happens before any argument is parsed,
+    /// so the file name is the whole of it. Everything that installs the shim or
+    /// judges an installed path reads it from here — a second spelling anywhere
+    /// is a `default_shell` that dispatches into the CLI and kills every pane.
+    pub const ARGV0: &'static str = "tethera-shim";
+
     /// How often the shim compares its own terminal size against the pty's.
     ///
     /// Polled rather than signalled. `SIGWINCH` does not exist on Windows, and
@@ -47,19 +70,44 @@ impl Shim {
     /// Read in chunks this size, matching `PtyPane`.
     const READ_CHUNK: usize = 8192;
 
-    /// Spike instrumentation. Writes to the path in TETHERA_SHIM_TRACE, because
-    /// the pane is the one place a message cannot go: stderr there is the thing
-    /// being measured.
-    fn trace(line: &str) {
-        if let Ok(path) = std::env::var("TETHERA_SHIM_TRACE") {
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                let _ = writeln!(file, "{line}");
-            }
+    /// How long the shim waits for its output thread to go quiet after the child
+    /// exits.
+    ///
+    /// `run` ends in `process::exit`, which does not wait for threads. Anything
+    /// the pty produced but the output thread has not yet written is lost at that
+    /// point, and the last thing a shell writes is usually the thing somebody
+    /// wanted to read.
+    ///
+    /// Waited on rather than joined. On Windows the ConPTY reader does not reach
+    /// EOF when the child exits, so joining that thread never returns — the same
+    /// reason `PtyPane::spawn_reader` is documented as never joined.
+    ///
+    /// Insurance rather than a fix for an observed loss: the run that appeared to
+    /// lose output was a shell that never started, because nothing had answered
+    /// its cursor query. Kept because the race is real and a quarter second at
+    /// process exit costs nothing.
+    pub const DRAIN_GRACE: Duration = Duration::from_millis(250);
+    const DRAIN_POLL: Duration = Duration::from_millis(25);
+
+    /// Writes bytes to the pty under one lock, and says whether it worked.
+    ///
+    /// The only way anything reaches this pty. The desk types on stdin, a client
+    /// types on the downlink, and the shim itself answers device queries — three
+    /// writers into one pty, where a byte from one landing inside another's
+    /// escape sequence arrives at the shell as neither key.
+    ///
+    /// An empty write succeeds without taking the lock: the reply path calls
+    /// this on every chunk and most chunks ask nothing.
+    pub fn write_whole(writer: &SharedWriter, bytes: &[u8]) -> bool {
+        if bytes.is_empty() {
+            return true;
         }
+
+        let Ok(mut held) = writer.lock() else {
+            return false;
+        };
+
+        held.write_all(bytes).is_ok() && held.flush().is_ok()
     }
 
     /// The shell to wrap when nothing named one.
@@ -90,7 +138,51 @@ impl Shim {
     }
 
     /// Runs the shell to completion and returns its exit code.
-    pub fn run(shell: &str, address: Option<&str>) -> anyhow::Result<i32> {
+    ///
+    /// The pane's own stdout is the sink. `run_capturing` is the same run
+    /// against a buffer.
+    ///
+    /// `args` are the shell's, not this process's.
+    ///
+    /// herdr does not exec `default_shell` bare — it invokes it the way it
+    /// invokes a shell, as `<shell> -NoExit -Command "<prompt integration>"`.
+    /// Anything in that slot is handed those arguments and has to give them to
+    /// the real shell. Swallowing them means a pane whose prompt integration
+    /// never runs; rejecting them means a pane that never starts at all, which
+    /// took out every new tab, split and agent start on the machine at once.
+    pub fn run(shell: &str, args: &[String], address: Option<&str>) -> anyhow::Result<i32> {
+        let out: SharedWriter = Arc::new(Mutex::new(Box::new(std::io::stdout())));
+
+        Self::execute(shell, args, address, out)
+    }
+
+    /// `run`, with the pane's output captured and no channel dialled.
+    ///
+    /// A behavioural seam rather than a test hook: the drain is the behaviour
+    /// worth asserting, and `run` reaches it only on the way to `process::exit`,
+    /// which a test cannot observe.
+    pub fn run_capturing(shell: &str) -> anyhow::Result<Vec<u8>> {
+        Self::run_capturing_with(shell, &[])
+    }
+
+    /// `run_capturing`, with arguments for the shell.
+    pub fn run_capturing_with(shell: &str, args: &[String]) -> anyhow::Result<Vec<u8>> {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let out: SharedWriter = Arc::new(Mutex::new(Box::new(Captured(Arc::clone(&seen)))));
+
+        Self::execute(shell, args, None, out)?;
+
+        let held = seen.lock().map_err(|_| anyhow::anyhow!("the capture lock was poisoned"))?;
+
+        Ok(held.clone())
+    }
+
+    fn execute(
+        shell: &str,
+        args: &[String],
+        address: Option<&str>,
+        out: SharedWriter,
+    ) -> anyhow::Result<i32> {
         let size = Self::own_size();
 
         let system = portable_pty::native_pty_system();
@@ -98,9 +190,23 @@ impl Shim {
 
         let mut command = CommandBuilder::new(shell);
 
+        for arg in args {
+            command.arg(arg);
+        }
+
         // Inherited by the shell and by everything it launches, so a shim
         // started inside this shell sees it and declines to nest.
         command.env(Self::MARKER, "1");
+
+        // Set explicitly, because `CommandBuilder` does not inherit it: with no
+        // cwd it starts the child in the user's home directory. The pane was
+        // opened in a project — herdr's `new_cwd` decided where, and this
+        // process is already there — so an unset cwd silently moves every
+        // shimmed pane to `~` and the operator's `git status` reports on their
+        // home directory.
+        if let Ok(cwd) = std::env::current_dir() {
+            command.cwd(cwd);
+        }
 
         let child = pair.slave.spawn_command(command)?;
 
@@ -116,6 +222,10 @@ impl Shim {
         // neither.
         let writer: SharedWriter = Arc::new(Mutex::new(pair.master.take_writer()?));
         let master: SharedMaster = Arc::new(Mutex::new(pair.master));
+        let screen: SharedScreen = Arc::new(Mutex::new(ShimScreen::new(Size {
+            cols: size.0,
+            rows: size.1,
+        })));
 
         // Raw mode is what makes the shell interactive. Without it this
         // process's own stdin is line buffered and echoed, so a keystroke does
@@ -125,7 +235,6 @@ impl Shim {
         // console has nothing to set, and refusing there would take out the
         // non-interactive case for the sake of tidiness.
         let raw = crossterm::terminal::enable_raw_mode();
-        Self::trace(&format!("size={size:?} raw={raw:?}"));
         let raw = raw.is_ok();
 
         let done = Arc::new(AtomicBool::new(false));
@@ -140,41 +249,51 @@ impl Shim {
         // keystrokes arrive on stdin while a client's arrive on the downlink.
         let claimed = Arc::new(AtomicBool::new(false));
 
-        // Dialled before the copy loops start, so the first bytes the shell
-        // produces are already being relayed. A pane whose stream began one
-        // prompt late would open on a screen with no prompt on it.
-        //
-        // Failure is not fatal and is not logged loudly: a stopped server is the
-        // ordinary case, and this pane is a working terminal either way.
-        //
-        // Two channels, in this order. The uplink is what makes the server adopt
-        // the pane, so a downlink opened first has nothing to attach to.
-        let uplink = match address {
-            Some(address) => Self::dial(address, size, "up").map(|(write, _)| write),
-            None => None,
-        };
+        // Empty until the dialler fills it, and emptied again whenever a write
+        // fails. The pane is a working terminal throughout.
+        let uplink: SharedUplink = Arc::new(Mutex::new(None));
 
-        if let (Some(address), true) = (address, uplink.is_some()) {
-            if let Some((_, read)) = Self::dial(address, size, "down") {
-                Self::spawn_downlink(
-                    read,
-                    Arc::clone(&writer),
-                    Arc::clone(&master),
-                    Arc::clone(&claimed),
-                    Arc::clone(&done),
-                );
-            }
+        if let Some(address) = address {
+            Self::spawn_dialler(
+                address.to_string(),
+                size,
+                Arc::clone(&writer),
+                Arc::clone(&master),
+                Arc::clone(&screen),
+                Arc::clone(&uplink),
+                Arc::clone(&claimed),
+                Arc::clone(&done),
+            );
         }
 
-        Self::spawn_output(reader, Arc::clone(&writer), uplink, Arc::clone(&done));
-        Self::spawn_input(Arc::clone(&writer), Arc::clone(&claimed), Arc::clone(&done));
-        Self::spawn_resize(master, Arc::clone(&claimed), Arc::clone(&done), size);
+        // Bumped by the output thread on every chunk it writes. The drain below
+        // watches it rather than joining the thread, which on Windows would
+        // never return.
+        let wrote = Arc::new(AtomicU64::new(0));
 
-        Self::trace("threads up, waiting on child");
+        Self::spawn_output(
+            reader,
+            Arc::clone(&writer),
+            Arc::clone(&screen),
+            out,
+            Arc::clone(&wrote),
+            Arc::clone(&uplink),
+            Arc::clone(&done),
+        );
+        Self::spawn_input(Arc::clone(&writer), Arc::clone(&claimed), Arc::clone(&done));
+        Self::spawn_resize(
+            master,
+            Arc::clone(&claimed),
+            Arc::clone(&uplink),
+            Arc::clone(&done),
+            size,
+        );
+
 
         let code = Self::wait(child);
 
-        Self::trace(&format!("child exited {code}"));
+
+        Self::drain(&wrote);
 
         done.store(true, Ordering::SeqCst);
 
@@ -205,6 +324,75 @@ impl Shim {
         }
     }
 
+    /// Keeps the pane's channel to the server open, redialling as needed.
+    ///
+    /// The dial fails routinely rather than exceptionally: the server is often
+    /// stopped when a pane opens, and it restarts under panes that are already
+    /// running. A one-shot dial would leave such a pane unreadable for its whole
+    /// life, which for an agent's pane means the phone can never see the work.
+    ///
+    /// Both channels or neither. The uplink is what makes the server adopt the
+    /// pane, so an uplink without its downlink is a pane that can be watched and
+    /// not typed into — worse than one that is simply not there yet, because
+    /// nothing about it looks wrong.
+    fn spawn_dialler(
+        address: String,
+        size: (u16, u16),
+        writer: SharedWriter,
+        master: SharedMaster,
+        screen: SharedScreen,
+        uplink: SharedUplink,
+        claimed: Arc<AtomicBool>,
+        done: Arc<AtomicBool>,
+    ) {
+        std::thread::spawn(move || {
+            // A pane with no id cannot announce itself, so there is nothing to
+            // retry. `HERDR_PANE_ID` is absent exactly when this is not a herdr
+            // pane at all.
+            if Self::pane_id().is_none() {
+                return;
+            }
+
+            loop {
+                if done.load(Ordering::SeqCst) {
+                    return;
+                }
+
+                let empty = uplink.lock().map(|held| held.is_none()).unwrap_or(false);
+
+                if empty {
+                    if let Some((write, _)) = Self::dial(&address, size, "up") {
+                        match Self::dial(&address, size, "down") {
+                            Some((_, read)) => {
+                                if let Ok(mut held) = uplink.lock() {
+                                    *held = Some(write);
+                                }
+
+                                Self::spawn_downlink(
+                                    read,
+                                    Arc::clone(&writer),
+                                    Arc::clone(&master),
+                                    Arc::clone(&screen),
+                                    Arc::clone(&claimed),
+                                    Arc::clone(&done),
+                                );
+                            }
+                            // The uplink is dropped rather than kept. A server
+                            // that adopted this pane will forget it when the
+                            // channel closes, and the next attempt starts clean.
+                            // The uplink is dropped rather than kept. A server that adopted
+                            // this pane forgets it when the channel closes, so the
+                            // next attempt starts clean.
+                            None => {}
+                        }
+                    }
+                }
+
+                std::thread::sleep(ShimLink::REDIAL_INTERVAL);
+            }
+        });
+    }
+
     /// Opens the channel and announces this pane.
     ///
     /// The size goes in the greeting because this side is the only one that can
@@ -219,9 +407,9 @@ impl Shim {
 
         let (read, mut write) = match ShimLink::dial(address) {
             Ok(pair) => pair,
-            Err(error) => {
-                Self::trace(&format!("dial failed {error}"));
-
+            // A stopped server is the ordinary case. `spawn_dialler` retries, and
+            // the pane is a working terminal in the meantime.
+            Err(_) => {
                 return None;
             }
         };
@@ -229,12 +417,10 @@ impl Shim {
         let hello = format!("{pane} {} {} {half}\n", size.0, size.1);
 
         if write.write_all(hello.as_bytes()).is_err() || write.flush().is_err() {
-            Self::trace("hello failed");
 
             return None;
         }
 
-        Self::trace(&format!("dialled {address} as {pane} {half}"));
 
         Some((write, read))
     }
@@ -249,6 +435,7 @@ impl Shim {
         mut downlink: Box<dyn Read + Send>,
         writer: SharedWriter,
         master: SharedMaster,
+        screen: SharedScreen,
         claimed: Arc<AtomicBool>,
         done: Arc<AtomicBool>,
     ) {
@@ -261,7 +448,6 @@ impl Shim {
                 }
 
                 let Some(length) = Downlink::payload_length(header) else {
-                    Self::trace("downlink named an oversize payload");
 
                     return;
                 };
@@ -274,27 +460,32 @@ impl Shim {
 
                 match Downlink::decode(header[0], &payload) {
                     Some(Downlink::Input(bytes)) => {
-                        let Ok(mut held) = writer.lock() else {
-                            return;
-                        };
-
-                        if held.write_all(&bytes).is_err() || held.flush().is_err() {
+                        if !Self::write_whole(&writer, &bytes) {
                             return;
                         }
                     }
                     Some(Downlink::Resize { cols, rows }) => {
                         claimed.store(true, Ordering::SeqCst);
 
+                        // A refused resize leaves the pty where it was and the
+                        // claim standing. The next frame is laid out for the old
+                        // geometry, which the client refits, rather than for one
+                        // the pty never took.
                         if let Ok(master) = master.lock() {
-                            let applied = master.resize(Self::pty_size((cols, rows)));
+                            let _ = master.resize(Self::pty_size((cols, rows)));
+                        }
 
-                            Self::trace(&format!("claimed {cols}x{rows} applied={applied:?}"));
+                        // The tracked geometry follows the pty's, or the next
+                        // cursor query is answered against the old grid and the
+                        // program is told it is somewhere it is not.
+                        if let Ok(mut screen) = screen.lock() {
+                            screen.resize(Size { cols, rows });
                         }
                     }
                     // Skipped, not fatal. A shim that outlived an upgrade should
                     // ignore a message it does not know rather than tear down a
                     // working pane.
-                    None => Self::trace(&format!("downlink tag {} ignored", header[0])),
+                    None => {}
                 }
             }
         });
@@ -308,12 +499,14 @@ impl Shim {
     fn spawn_output(
         mut reader: Box<dyn Read + Send>,
         writer: SharedWriter,
-        mut uplink: Option<Box<dyn Write + Send>>,
+        screen: SharedScreen,
+        out: SharedWriter,
+        wrote: Arc<AtomicU64>,
+        uplink: SharedUplink,
         done: Arc<AtomicBool>,
     ) {
         std::thread::spawn(move || {
             let mut buffer = vec![0u8; Self::READ_CHUNK];
-            let mut out = std::io::stdout();
 
             loop {
                 match reader.read(&mut buffer) {
@@ -325,29 +518,39 @@ impl Shim {
                         // through two nested ConPTYs — measured: the query goes
                         // out and no reply comes back, so the shell never starts.
                         // The shim owns this pty, so the shim answers.
-                        if Self::answers(&buffer[..read]) {
-                            if let Ok(mut writer) = writer.lock() {
-                                let _ = writer.write_all(b"\x1b[1;1R");
-                                let _ = writer.flush();
-                            }
+                        //
+                        // One lock for both answers, because both read and
+                        // change the same tracked screen.
+                        let (replies, visible) = match screen.lock() {
+                            Ok(mut screen) => (
+                                screen.observe(&buffer[..read]),
+                                screen.forward(&buffer[..read]),
+                            ),
+                            // A poisoned lock must not silence the pane. The
+                            // bytes go out unfiltered, which risks the console
+                            // leak this filter exists to stop and is strictly
+                            // better than a terminal that stops drawing.
+                            Err(_) => (Vec::new(), buffer[..read].to_vec()),
+                        };
+
+                        if !Self::write_whole(&writer, &replies) {
+                            return;
                         }
 
                         // The pane first, the server second. The desk is a
                         // display somebody may be looking at, and a blocked or
                         // dead channel must never delay it.
-                        if out.write_all(&buffer[..read]).is_err() || out.flush().is_err() {
+                        //
+                        // Filtered here and raw on the uplink: the server is not
+                        // a guest in anybody's terminal, and it resizes its
+                        // emulator from the claim rather than from the stream.
+                        if !Self::write_whole(&out, &visible) {
                             return;
                         }
 
-                        if let Some(channel) = uplink.as_mut() {
-                            if channel.write_all(&buffer[..read]).is_err()
-                                || channel.flush().is_err()
-                            {
-                                Self::trace("uplink ended");
+                        wrote.fetch_add(1, Ordering::SeqCst);
 
-                                uplink = None;
-                            }
-                        }
+                        Self::report(&uplink, &Uplink::Output(buffer[..read].to_vec()));
                     }
                     Err(_) => return,
                 }
@@ -357,11 +560,6 @@ impl Shim {
                 }
             }
         });
-    }
-
-    /// Whether a chunk from the pty holds a cursor position request.
-    fn answers(chunk: &[u8]) -> bool {
-        chunk.windows(4).any(|window| window == b"\x1b[6n")
     }
 
     /// This process's stdin to the pty, which is the desk typing.
@@ -378,17 +576,11 @@ impl Shim {
                 match input.read(&mut buffer) {
                     Ok(0) => return,
                     Ok(read) => {
-                        Self::trace(&format!("stdin {read} claimed_was={}", claimed.load(Ordering::SeqCst)));
 
                         if claimed.swap(false, Ordering::SeqCst) {
-                            Self::trace("the desk took the session back");
                         }
 
-                        let Ok(mut held) = writer.lock() else {
-                            return;
-                        };
-
-                        if held.write_all(&buffer[..read]).is_err() || held.flush().is_err() {
+                        if !Self::write_whole(&writer, &buffer[..read]) {
                             return;
                         }
                     }
@@ -408,9 +600,33 @@ impl Shim {
     /// reported. After a claim is released the desk's size has usually not
     /// changed, so comparing against the terminal would find nothing to do and
     /// leave the pty at the phone's width until somebody dragged a window.
+    /// Sends one framed message to the server, and forgets the channel if it
+    /// has gone.
+    ///
+    /// A dead channel is not an error here. The pane is a working terminal
+    /// whether or not the server is listening, and `spawn_dialler` is what brings
+    /// the channel back.
+    fn report(uplink: &SharedUplink, message: &Uplink) {
+        let Ok(mut held) = uplink.lock() else {
+            return;
+        };
+
+        let Some(channel) = held.as_mut() else {
+            return;
+        };
+
+        let encoded = message.encode();
+
+        if channel.write_all(&encoded).is_err() || channel.flush().is_err() {
+
+            *held = None;
+        }
+    }
+
     fn spawn_resize(
         master: SharedMaster,
         claimed: Arc<AtomicBool>,
+        uplink: SharedUplink,
         done: Arc<AtomicBool>,
         initial: (u16, u16),
     ) {
@@ -445,9 +661,15 @@ impl Shim {
                     };
 
                     if master.resize(Self::pty_size(desk)).is_ok() {
-                        Self::trace(&format!("desk took back {}x{}", desk.0, desk.1));
 
                         applied = desk;
+                        Self::report(
+                            &uplink,
+                            &Uplink::Resized {
+                                cols: desk.0,
+                                rows: desk.1,
+                            },
+                        );
                     }
 
                     continue;
@@ -464,13 +686,41 @@ impl Shim {
                 };
 
                 if master.resize(Self::pty_size(now)).is_ok() {
-                    Self::trace(&format!("desk size {}x{}", now.0, now.1));
 
                     applied = now;
                     desk = now;
+                    Self::report(
+                        &uplink,
+                        &Uplink::Resized {
+                            cols: now.0,
+                            rows: now.1,
+                        },
+                    );
                 }
             }
         });
+    }
+
+    /// Waits for the output thread to stop making progress.
+    ///
+    /// Two consecutive polls with an unchanged count mean the last chunk has
+    /// been written; `DRAIN_GRACE` bounds the wait for a pane still producing
+    /// output as it dies, so a wedged pty cannot hold the process open.
+    fn drain(wrote: &Arc<AtomicU64>) {
+        let deadline = std::time::Instant::now() + Self::DRAIN_GRACE;
+        let mut last = wrote.load(Ordering::SeqCst);
+
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(Self::DRAIN_POLL);
+
+            let now = wrote.load(Ordering::SeqCst);
+
+            if now == last {
+                return;
+            }
+
+            last = now;
+        }
     }
 
     fn wait(mut child: Box<dyn Child + Send + Sync>) -> i32 {
@@ -478,5 +728,27 @@ impl Shim {
             Ok(status) => i32::try_from(status.exit_code()).unwrap_or(0),
             Err(_) => 0,
         }
+    }
+}
+
+/// A sink that keeps what was written, for `Shim::run_capturing`.
+///
+/// The pane's real sink is this process's stdout, which a test cannot read back.
+struct Captured(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Captured {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self.0.lock() {
+            Ok(mut held) => {
+                held.extend_from_slice(bytes);
+
+                Ok(bytes.len())
+            }
+            Err(_) => Err(std::io::Error::other("the capture lock was poisoned")),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }

@@ -62,7 +62,7 @@ impl PaneAttachments {
 
         self.stop(&pane).await;
 
-        log::info!("attaching to {} as {:?}", pane.as_str(), spec.view);
+        log::info!("attaching to {}", pane.as_str());
 
         let (frames, input) = Attach::open(&connection, spec)
             .await

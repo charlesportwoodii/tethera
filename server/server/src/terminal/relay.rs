@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use crate::backend::herdr::HerdrIds;
 use crate::terminal::event::PaneEvent;
 use crate::terminal::io::PaneIo;
-use crate::terminal::link::Downlink;
+use crate::terminal::link::{Downlink, Uplink};
 use crate::terminal::registry::PaneRegistry;
 use crate::terminal::source::PaneSource;
 
@@ -108,9 +108,6 @@ impl ShimRelay {
 
         claim.try_send(size).is_ok()
     }
-
-    /// Read in chunks this size, matching `PtyPane`.
-    const READ_CHUNK: usize = 8192;
 
     /// How long a downlink waits for its uplink to be adopted.
     ///
@@ -266,36 +263,51 @@ impl ShimRelay {
         }
     }
 
-    /// The shim's pty output into the emulator.
+    /// The shim's pty output and its resizes, into the emulator.
+    ///
+    /// Header then body, never by chunk: the pipe chooses where an arrival ends,
+    /// so treating one as a message would split a resize the first time it was
+    /// delivered in two pieces.
     fn spawn_inbound<R>(mut reader: BufReader<R>, events: mpsc::Sender<PaneEvent>)
     where
         R: tokio::io::AsyncRead + Unpin + Send + 'static,
     {
         tokio::spawn(async move {
-            let mut buffer = vec![0u8; Self::READ_CHUNK];
+            let mut header = [0u8; Uplink::HEADER_BYTES];
 
             loop {
-                match reader.read(&mut buffer).await {
-                    Ok(0) => break,
-                    Ok(read) => {
-                        // Awaited, unlike the reply path. This is output
-                        // backpressure, and the right place for it to land is
-                        // the shim's own write - which backs up into its pty and
-                        // slows the program down, exactly as a slow terminal
-                        // would.
-                        if events
-                            .send(PaneEvent::Output(buffer[..read].to_vec()))
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                    Err(error) => {
-                        tracing::debug!(%error, "a shim channel ended");
+                if reader.read_exact(&mut header).await.is_err() {
+                    break;
+                }
 
-                        break;
+                let Some(length) = Uplink::payload_length(header) else {
+                    tracing::warn!("a shim named an oversize payload");
+
+                    break;
+                };
+
+                let mut payload = vec![0u8; length];
+
+                if reader.read_exact(&mut payload).await.is_err() {
+                    break;
+                }
+
+                // Awaited, unlike the reply path. This is output backpressure,
+                // and the right place for it to land is the shim's own write —
+                // which backs up into its pty and slows the program down,
+                // exactly as a slow terminal would.
+                let event = match Uplink::decode(header[0], &payload) {
+                    Some(Uplink::Output(bytes)) => PaneEvent::Output(bytes),
+                    Some(Uplink::Resized { cols, rows }) => {
+                        PaneEvent::Resized(Size { cols, rows })
                     }
+                    // Skipped rather than fatal, so a shim from a newer build
+                    // does not tear down a pane somebody is working in.
+                    None => continue,
+                };
+
+                if events.send(event).await.is_err() {
+                    return;
                 }
             }
 

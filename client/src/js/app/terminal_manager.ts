@@ -3,7 +3,6 @@ import { TerminalGrid } from "$console/lib/terminal";
 import type { Key } from "$bindings/Key";
 import type { Mods } from "$bindings/Mods";
 import type { PaneFrame } from "$bindings/PaneFrame";
-import type { PaneView } from "$bindings/PaneView";
 import type { TerminalControls } from "$bindings/TerminalControls";
 import type { Invoke } from "./server_manager";
 
@@ -24,11 +23,9 @@ const NOTHING: TerminalControls = {
   attach: false,
   input: false,
   scrollback: false,
-  streamed: false,
   open: false,
   split: false,
   close: false,
-  lines_view: false,
   layout: false,
   focus_tab: false,
 };
@@ -62,18 +59,15 @@ export class TerminalManager {
   private readonly revisionStore: Writable<number>;
   private readonly liveStore: Writable<boolean>;
   private readonly errorStore: Writable<string | null>;
-  private readonly viewStore: Writable<PaneView>;
   private readonly controlStore: Writable<TerminalControls>;
 
   public readonly revision: Readable<number>;
   /** Whether a stream is open. False means nothing typed will arrive. */
   public readonly live: Readable<boolean>;
   public readonly error: Readable<string | null>;
-  public readonly view: Readable<PaneView>;
   public readonly controls: Readable<TerminalControls>;
 
   private pane: string | null = null;
-  private held: PaneView = "lines";
   private unlisten: (() => void) | null = null;
   private unlistenEnded: (() => void) | null = null;
   private retry: ReturnType<typeof setTimeout> | null = null;
@@ -89,13 +83,11 @@ export class TerminalManager {
     this.revisionStore = writable(0);
     this.liveStore = writable(false);
     this.errorStore = writable(null);
-    this.viewStore = writable(this.held);
     this.controlStore = writable(NOTHING);
 
     this.revision = { subscribe: this.revisionStore.subscribe };
     this.live = { subscribe: this.liveStore.subscribe };
     this.error = { subscribe: this.errorStore.subscribe };
-    this.view = { subscribe: this.viewStore.subscribe };
     this.controls = { subscribe: this.controlStore.subscribe };
   }
 
@@ -132,20 +124,6 @@ export class TerminalManager {
 
     await this.subscribe();
     await this.attach();
-  }
-
-  /** Reads the same pane the other way. */
-  async setView(view: PaneView): Promise<void> {
-    if (view === this.held) {
-      return;
-    }
-
-    this.held = view;
-    this.viewStore.set(view);
-
-    if (this.pane !== null) {
-      await this.attach();
-    }
   }
 
   async key(key: Key, mods: Mods): Promise<void> {
@@ -201,7 +179,6 @@ export class TerminalManager {
       await this.invoke("attach_pane", {
         server: this.server,
         pane,
-        view: this.held,
         cols: this.cols,
         rows: this.rows,
       });

@@ -156,15 +156,4 @@ describe("TerminalManager", () => {
     expect(attachCalls).toHaveLength(0);
   });
 
-  test("switching view re-attaches the same pane with the other reading", async () => {
-    const manager = await attached();
-    invoke.mockClear();
-
-    await manager.setView("screen");
-
-    expect(invoke).toHaveBeenCalledWith(
-      "attach_pane",
-      expect.objectContaining({ pane: "pn_a", view: "screen" }),
-    );
-  });
 });

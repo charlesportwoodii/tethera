@@ -17,13 +17,6 @@ pub struct TerminalControls {
     pub attach: bool,
     pub input: bool,
     pub scrollback: bool,
-    /// Whether a pane's frames are the program's own bytes.
-    ///
-    /// False means the screen is sampled on a timer, so a full-screen program
-    /// piles up instead of redrawing and there is no cursor to draw. The screen
-    /// says so once, in a line beside the pane, rather than leaving somebody to
-    /// conclude the app is broken.
-    pub streamed: bool,
     pub open: bool,
     pub split: bool,
     pub close: bool,
@@ -36,11 +29,4 @@ pub struct TerminalControls {
     pub layout: bool,
     /// Whether tapping a tab here also moves the desk to it.
     pub focus_tab: bool,
-    /// Whether this machine can return output with its wrapping removed.
-    ///
-    /// False means the view toggle is absent rather than present and handing
-    /// back the other view. A pty publishes bytes already laid out for its own
-    /// width, and un-wrapping them would need the emulator to record which line
-    /// breaks were autowrap; nothing does that yet.
-    pub lines_view: bool,
 }

@@ -161,3 +161,68 @@ describe("Conversations.byDay", () => {
     expect(Conversations.byDay([], now)).toEqual([]);
   });
 });
+
+describe("Conversations.releasable", () => {
+  test("offers release for a session with a pane on a machine that is answering", () => {
+    expect(Conversations.releasable(a(true), true)).toBe(true);
+  });
+
+  // Releasing closes a pane. A conversation with no pane has nothing to close,
+  // and a swipe that did nothing would read as a broken control.
+  test("does not offer release for a session with no pane", () => {
+    expect(Conversations.releasable(a(false), true)).toBe(false);
+  });
+
+  test("does not offer release on a machine that is not answering", () => {
+    expect(Conversations.releasable(a(true), false)).toBe(false);
+  });
+});
+
+describe("Conversations.preview", () => {
+  test("gives the machine's own line with its markup stripped", () => {
+    const held = { ...a(true), preview: "Run `migrate` **now**?" } as Conversation;
+
+    expect(Conversations.preview(held)).toBe("Run migrate now?");
+  });
+
+  // A machine that sent no preview is not a machine that said nothing useful —
+  // it is one that has not been read yet. Empty, not a placeholder sentence.
+  test("is empty when the machine sent none", () => {
+    const held = { ...a(true), preview: null } as Conversation;
+
+    expect(Conversations.preview(held)).toBe("");
+  });
+});
+
+// `byDay` compares against the previous group rather than a map, so rows that
+// arrive out of date order legitimately produce two groups with one label. A
+// caller keying an {#each} on the label then hits Svelte's duplicate-key error
+// and the whole block silently renders nothing — which on a phone reads as the
+// machine having no earlier sessions at all.
+describe("Conversations.byDay keys", () => {
+  const now = new Date(2026, 7, 26, 12, 0);
+
+  function on(date: Date): Conversation {
+    return { ...a(false), last_active: date.getTime() } as Conversation;
+  }
+
+  test("gives repeated labels distinct keys", () => {
+    const out = Conversations.byDay(
+      [
+        on(new Date(2026, 7, 26, 12, 0)),
+        on(new Date(2026, 7, 25, 12, 0)),
+        on(new Date(2026, 7, 26, 9, 0)),
+      ],
+      now,
+    );
+
+    expect(out.map((group) => group.label)).toEqual(["Today", "Yesterday", "Today"]);
+
+    const keys = out.map((group) => group.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  test("every group carries a key", () => {
+    expect(Conversations.byDay([on(new Date(2026, 7, 26, 12, 0))], now)[0].key).toBeTruthy();
+  });
+});

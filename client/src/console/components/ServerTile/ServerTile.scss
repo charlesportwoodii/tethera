@@ -1,0 +1,155 @@
+@use "../../tokens/mixins" as *;
+
+.tc-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--tc-surface);
+  border-radius: var(--tc-r-control);
+  box-shadow: inset 0 0 0 1px var(--tc-rule);
+  overflow: hidden;
+
+  // The ring is the whole of the fleet-scanning signal: it says which machine
+  // to look at before a single word has been read.
+  &[data-attention="true"] {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tc-attn) 34%, transparent);
+  }
+
+  &.is-quiet {
+    opacity: 0.62;
+  }
+}
+
+// The whole card, behind everything. `inset: 0` rather than a wrapper, because
+// the + button has to sit above it and a nested button is not valid HTML.
+.tc-tile__open {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  // Inset, so the ring follows the tile's own edge rather than drawing outside
+  // it and colliding with the tile above.
+  &:focus-visible {
+    outline: 2px solid var(--tc-ink);
+    outline-offset: -3px;
+    border-radius: var(--tc-r-control);
+  }
+
+  &:active {
+    background: color-mix(in srgb, var(--tc-ink) 5%, transparent);
+  }
+}
+
+// Content sits above the target but lets taps through to it. Only a real
+// control inside the card takes its taps back.
+.tc-tile__head,
+.tc-tile__strip,
+.tc-tile__say {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.tc-tile__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 8px 0 14px;
+}
+
+.tc-tile__id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.tc-tile__name {
+  max-width: 100%;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  @include truncate;
+}
+
+.tc-tile__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tc-tile__meta {
+  flex: none;
+  @include mono-label(10px, 0.02em);
+  text-transform: none;
+  @include truncate;
+}
+
+.tc-tile__refusal {
+  @include mono-label(10px, 0.02em);
+  text-transform: none;
+  color: var(--tc-attn);
+}
+
+// No fill, no border, no radius. The accent is the affordance in this system —
+// anything you act on is that colour and nothing else is — so a chip around the
+// mark only stacks a third surface tone and a second border inside a tile that
+// already has both.
+//
+// A finger, not a cursor: the 44px box is the target and the mark inside it
+// stays small, so the padding does the work.
+.tc-tile__start {
+  pointer-events: auto;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -8px -4px 0 0;
+  border: 0;
+  background: none;
+  color: var(--tc-accent);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  // With no fill there is nothing to depress, and the platform highlight is
+  // suppressed above, so the press has to be drawn here or the control feels
+  // dead on a touch screen.
+  &:active {
+    opacity: 0.55;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--tc-ink);
+    outline-offset: 2px;
+  }
+}
+
+.tc-tile__strip {
+  padding: 10px 14px 0;
+}
+
+// Tight to the strip it describes. The two are one statement — the marks and
+// the words for the same sessions — and a gap between them reads as a stray
+// glyph above an unrelated line, which is exactly how a single-session machine
+// looked at the first spacing.
+.tc-tile__say {
+  margin: 0;
+  padding: 5px 14px 12px;
+  font-size: 12.5px;
+  color: var(--tc-ink-2);
+  @include truncate;
+}
+
+.tc-tile__say--empty {
+  color: var(--tc-ink-3);
+}

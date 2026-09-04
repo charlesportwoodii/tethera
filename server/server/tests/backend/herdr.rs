@@ -18,7 +18,7 @@ use tethera_server_lib::backend::herdr::wire::{
     SnapshotBody,
 };
 use tethera_server_lib::backend::herdr::{HerdrIds, Mapping, ScrollbackWindow};
-use tethera_server_lib::backend::BackendError;
+use tethera_server_lib::backend::{BackendError, HerdrBackend};
 
 /// A captured herdr answer, read from disk.
 struct Fixture;
@@ -744,4 +744,62 @@ fn a_request_for_the_whole_buffer_is_capped() {
     let window = ScrollbackWindow::plan(Some(u32::MAX), 500);
 
     assert_eq!(window.lines_to_request, ScrollbackWindow::MAX_LINES);
+}
+
+// A typed launch must ask herdr to type, not to start.
+//
+// `agent start` is the supervised route and it inspects the process herdr
+// spawned in the pane: measured against herdr 0.8.2, `available_pane_shell`
+// requires that process to carry one of fifteen known shell names and, on
+// Windows, to have no descendants at all. A pane whose shell is wrapped by the
+// shim fails both, and the refusal arrives as `agent_pane_busy` — "agent target
+// pane w6H:p1 is not an available shell" — however healthy the shell inside is.
+//
+// So a wrapped pane has exactly one route left, and this pins which one it is.
+// Reaching for `agent start` here costs the caller the whole readiness deadline
+// and then fails, which reads as a broken agent rather than a wrong call.
+#[test]
+fn a_typed_launch_asks_herdr_to_run_the_line_not_to_start_an_agent() {
+    let argv = vec!["claude".to_string(), "--permission-mode".to_string()];
+
+    let args = HerdrBackend::typed_launch_args("w6H:p1", &argv).expect("an argv names a binary");
+
+    assert_eq!(
+        args,
+        vec!["pane", "run", "w6H:p1", "claude", "--permission-mode"],
+        "a typed launch must go through `pane run`"
+    );
+}
+
+// The argv stays split all the way to herdr.
+//
+// herdr takes the command as trailing arguments, so a flag value carrying a
+// space survives. Joined into one string it would be re-split by whatever reads
+// it next, at a boundary nobody chose.
+#[test]
+fn a_typed_launch_keeps_an_argument_that_contains_a_space_whole() {
+    let argv = vec![
+        "claude".to_string(),
+        "--append-system-prompt".to_string(),
+        "be terse".to_string(),
+    ];
+
+    let args = HerdrBackend::typed_launch_args("w6H:p1", &argv).expect("an argv names a binary");
+
+    assert_eq!(args.last().map(String::as_str), Some("be terse"));
+}
+
+// An agent that names no binary is refused before herdr is called.
+//
+// `pane run` with no command is herdr's own usage error, which would reach a
+// client as a backend failure naming a CLI it never asked about.
+#[test]
+fn a_typed_launch_with_nothing_to_run_is_refused() {
+    let error = HerdrBackend::typed_launch_args("w6H:p1", &[])
+        .expect_err("an empty argv names no binary");
+
+    assert!(
+        error.to_string().contains("names no binary"),
+        "the refusal must name the cause: {error}"
+    );
 }

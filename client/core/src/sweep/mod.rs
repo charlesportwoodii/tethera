@@ -39,7 +39,12 @@ impl Sweep {
     ///
     /// The list is a glance across every machine, not a full index. The rest are
     /// a page away, where they can be paged and sectioned properly.
-    pub const ROW_CONVERSATIONS: u16 = 5;
+    ///
+    /// Twelve rather than five because this is a `Live` listing. Five was a cap
+    /// on the newest sessions on disk, where the sixth was almost always
+    /// finished work; it is now a cap on what is actually running, where the
+    /// twelfth may be the one somebody is waiting on.
+    pub const ROW_CONVERSATIONS: u16 = 12;
 
     pub async fn run(
         endpoint: &ClientEndpoint,
@@ -153,7 +158,11 @@ impl Sweep {
         held: &[Conversation],
     ) -> Vec<Conversation> {
         let request = Request::ListConversations {
-            filter: ConversationFilter::All,
+            // What is running, rather than what is newest. An unbound
+            // conversation is reported Done whatever its records say, so an
+            // unfiltered listing spends the row's whole budget on finished work
+            // and hides the agent that is blocked behind it.
+            filter: ConversationFilter::Live,
             before: None,
             limit: Self::ROW_CONVERSATIONS,
         };

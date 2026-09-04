@@ -96,7 +96,7 @@
           >
           Open {ordinal} chat
         </button>
-      {:else if controls.attach}
+      {:else if controls.attach && held.streamed}
         <button
           class="a primary enter"
           type="button"

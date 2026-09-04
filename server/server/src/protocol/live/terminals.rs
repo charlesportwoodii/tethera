@@ -2,11 +2,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tethera_common::protocol::capability::{self, CapabilityId, CapabilitySet};
-use tethera_common::protocol::error::{EntityKind, WireError};
+use tethera_common::protocol::error::WireError;
 use tethera_common::protocol::terminal::{
     attrs, AttachSpec, Color, Key, Mods, RowUpdate, Span, Style,
 };
-use tethera_common::protocol::view::PaneView;
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
 use tethera_common::structs::terminal::{Pane, SplitDirection, Tab, TabLayout};
@@ -15,9 +14,9 @@ use tokio::sync::Semaphore;
 
 use crate::backend::{BackendError, BackendTree, TerminalBackend};
 use crate::config::{ApplicationConfig, TerminalKind};
-use crate::protocol::live::{HerdrSession, LiveSession};
+use crate::protocol::live::LiveSession;
 use crate::protocol::ports::{ScrollbackPage, TerminalPort};
-use crate::terminal::{HerdrSource, PaneRegistry, PtyBackend};
+use crate::terminal::{PaneRegistry, PtyBackend, ShimLink, ShimListener, ShimRelay};
 
 /// `TerminalPort` over a real terminal backend.
 ///
@@ -32,6 +31,12 @@ pub struct LiveTerminals {
     /// Shared with the backend, which adopts into it when it opens a pane, so
     /// emulation starts at a pane's first byte rather than at its first attach.
     panes: Arc<PaneRegistry>,
+    /// The relay shims dial into, and the one `attach` claims geometry through.
+    ///
+    /// Built here rather than passed, so there is exactly one per port. Two would
+    /// let a shim adopt into one and be claimed through the other, and a claim
+    /// that reached nothing is indistinguishable from a pane that ignored it.
+    relay: Arc<ShimRelay>,
     gate: Arc<Semaphore>,
     deadline: Duration,
     /// The panes of the last tree this port read.
@@ -113,7 +118,15 @@ impl LiveTerminals {
             ),
         });
 
-        Self::new_shared(backend, panes)
+        let port = Self::new_shared(backend, panes);
+
+        // Started here because this is where the registry a shim adopts into is
+        // built. A pane announces itself whenever it opens, including one split
+        // by hand at the desk, so there is nothing to discover and nothing to
+        // poll.
+        ShimListener::spawn(port.relay(), ShimLink::address(&config.data_dir));
+
+        port
     }
 
     /// The same port with the admission gate and the deadline named.
@@ -128,12 +141,22 @@ impl LiveTerminals {
         deadline: Duration,
     ) -> Self {
         Self {
+            relay: ShimRelay::new_shared(Arc::clone(&panes)),
             backend,
             panes,
             gate: Arc::new(Semaphore::new(permits.max(1))),
             deadline,
             seen: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The relay this port adopts shims into.
+    ///
+    /// Exposed so the listener serves the same instance `attach` claims through.
+    /// An accessor rather than a public field, because nothing outside may
+    /// replace it.
+    pub fn relay(&self) -> Arc<ShimRelay> {
+        Arc::clone(&self.relay)
     }
 
     /// Which conversation each pane is running, as of the last tree read.
@@ -183,12 +206,6 @@ impl LiveTerminals {
             named.push(capability::TERMINAL_INPUT);
         }
 
-        // A third fact about attaching, and the one a client has to be told
-        // rather than left to discover: both backends attach, and only one of
-        // them is showing the program's own bytes.
-        if self.backend.can_stream() {
-            named.push(capability::TERMINAL_STREAMED);
-        }
 
         // Asked of the backend rather than inferred from attach. The two were
         // the same question while only one backend could attach; they are not
@@ -208,9 +225,6 @@ impl LiveTerminals {
             named.push(capability::TAB_FOCUS);
         }
 
-        if self.backend.can_lines_view() {
-            named.push(capability::TERMINAL_LINES_VIEW);
-        }
 
         named.into_iter().map(CapabilityId::from).collect()
     }
@@ -221,6 +235,16 @@ impl LiveTerminals {
         let tree = self
             .run(|backend| backend.tree().map_err(anyhow::Error::from))
             .await?;
+
+        // Stamped here because this is the only layer holding both the tree and
+        // the registry. A backend builds panes without ever seeing the registry,
+        // and a client needs the answer before somebody taps a pane that cannot
+        // be shown.
+        let mut tree = tree;
+
+        for pane in &mut tree.panes {
+            pane.streamed = self.panes.holds(&pane.id);
+        }
 
         *self.seen.lock().expect("lock") = tree.panes.clone();
 
@@ -233,6 +257,13 @@ impl LiveTerminals {
     /// for the agent to be ready for input, and that wait is the point. Under
     /// the ordinary deadline every start would be reported as `Busy` while the
     /// agent was still coming up.
+    ///
+    /// A pane this registry holds takes the typed route instead. Its shell is
+    /// wrapped — by a shim relaying it, or by this server owning the pty
+    /// outright — and a multiplexer decides what it will start an agent in by
+    /// inspecting the process it spawned in the pane. A wrapper fails that
+    /// inspection whatever is running inside it, so asking for a supervised
+    /// start here would spend the whole deadline to arrive at a refusal.
     pub async fn start_agent(
         &self,
         pane: &PaneId,
@@ -240,9 +271,14 @@ impl LiveTerminals {
     ) -> Result<Option<ConversationId>, WireError> {
         let pane = pane.clone();
         let spawn = spawn.clone();
+        let wrapped = self.panes.holds(&pane);
 
         self.run_within(Self::START_DEADLINE, move |backend| {
-            backend.start_agent(&pane, &spawn)
+            if wrapped {
+                backend.type_agent_launch(&pane, &spawn)
+            } else {
+                backend.start_agent(&pane, &spawn)
+            }
         })
         .await
     }
@@ -409,63 +445,44 @@ impl TerminalPort for LiveTerminals {
     }
 
     async fn attach(&self, spec: &AttachSpec) -> Result<Self::Session, WireError> {
-        // Keyed on which backend owns the feed, not on whether the registry
-        // already holds this pane. `holds` is true for a pty pane from the
-        // moment it is opened and true for a herdr pane once anybody has looked
-        // at it - so gating on it skipped `ensure` for every *re*-attach, and a
-        // re-attach carrying a different view is exactly what the view toggle
-        // is. That is what made the toggle inert even after `ensure` itself
-        // learned to notice a changed shape.
-        if self.backend.is_pulled() {
-            if !self.backend.can_attach() {
-                return Err(WireError::NotFound {
-                    kind: EntityKind::Pane,
-                });
-            }
-
-            // `Lines` needs a backend that can return output with its wrapping
-            // removed. Refusing here rather than quietly serving the other view
-            // keeps the answer honest: `terminal_lines_view` says which machines
-            // offer it, and a client that ignored that gets told.
-            if spec.view == PaneView::Lines && !self.backend.can_lines_view() {
-                return Err(WireError::Backend {
-                    message: "this machine cannot return output with its wrapping removed"
-                        .to_string(),
-                });
-            }
-
-            HerdrSource::ensure(
-                Arc::clone(&self.backend),
-                Arc::clone(&self.panes),
-                Arc::clone(&self.gate),
-                spec.pane.clone(),
-                spec.view,
-                spec.viewport,
-            );
-        } else if !self.panes.holds(&spec.pane) {
-            // A pushed pane is adopted when it is opened, so one the registry
-            // does not hold is one this machine does not have.
-            return Err(WireError::NotFound {
-                kind: EntityKind::Pane,
+        // A pane is readable exactly when a shim is relaying it. Nothing else
+        // adopts into the registry now that the polled feed is gone, so `holds`
+        // is the whole question.
+        if !self.panes.holds(&spec.pane) {
+            // Not `NotFound`: the operator can see this pane in their own tab
+            // strip, so "no such pane" would be a lie about a pane they are
+            // looking at. What is missing is the shim, and the fix — reopen it,
+            // and it starts under one — is not something anybody would guess
+            // from a missing-pane error.
+            return Err(WireError::Backend {
+                message: "this pane started before the terminal shim, so nothing here can \
+                          read it. close it and open a new one, and it will stream"
+                    .to_string(),
             });
         }
 
         let frames = self.panes.attach(&spec.pane)?;
 
+        // The viewport is a claim on this pane's geometry, not a hint. A client
+        // that attached and then read a grid laid out for the desk would be
+        // reading a terminal it cannot draw.
+        //
+        // A refused claim is not an error: a pane with no shim has no geometry to
+        // hand over, and such a pane is refused earlier for a better reason.
+        if self.relay.claim(&spec.pane, spec.viewport) {
+            tracing::info!(
+                pane = spec.pane.as_str(),
+                cols = spec.viewport.cols,
+                rows = spec.viewport.rows,
+                "a client claimed this pane's geometry"
+            );
+        }
+
         // Input splits here and nowhere else. A pty takes the bytes the emulator
         // encoded; herdr takes key names, and the emulator is a reader of its
         // panes rather than their owner, so anything written into it would reach
         // nobody.
-        if self.backend.can_lines_view() {
-            return Ok(LiveSession::Herdr(HerdrSession::new(
-                frames,
-                Arc::clone(&self.backend),
-                Arc::clone(&self.gate),
-                spec.pane.clone(),
-            )));
-        }
-
-        Ok(LiveSession::Direct(frames))
+Ok(LiveSession::Direct(frames))
     }
 
     async fn scrollback(

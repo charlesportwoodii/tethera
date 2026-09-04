@@ -15,7 +15,6 @@ pub use wire::Snapshot;
 use crate::backend::error::BackendError;
 use crate::backend::BackendTree;
 use tethera_common::structs::terminal::TabLayout;
-use tethera_common::protocol::view::PaneView;
 use tethera_common::protocol::terminal::{Key, Mods};
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
@@ -59,6 +58,33 @@ impl HerdrBackend {
 
     pub fn default_size(&self) -> Size {
         self.default_size
+    }
+
+    /// The herdr call that types a launch line at a pane and runs it.
+    ///
+    /// `pane run`, never `agent start`. The two are not interchangeable here:
+    /// `agent start` inspects the process herdr spawned in the pane and refuses
+    /// anything that is not a bare, idle, recognised shell, which is every pane
+    /// whose shell is wrapped. This route asks herdr for no judgement at all.
+    ///
+    /// The argv stays split. Joining it into one string would hand herdr a
+    /// sentence to re-split, and an agent flag carrying a space would come
+    /// apart at a place nobody chose.
+    ///
+    /// An associated function taking its inputs, so the choice of subcommand is
+    /// checkable without herdr installed.
+    pub fn typed_launch_args(
+        native_pane: &str,
+        argv: &[String],
+    ) -> anyhow::Result<Vec<String>> {
+        if argv.is_empty() {
+            return Err(BackendError::message("that agent names no binary to launch").into());
+        }
+
+        let mut args = vec!["pane".to_string(), "run".to_string(), native_pane.to_string()];
+        args.extend(argv.iter().cloned());
+
+        Ok(args)
     }
 
     /// A name herdr will accept for an agent, derived from the pane it runs in.
@@ -198,35 +224,6 @@ impl HerdrBackend {
     ///
     /// `strip_ansi` is not passed: `--format ansi` is what keeps the colours,
     /// and a read without it returns a screen that renders as plain grey.
-    pub fn read_screen(
-        &self,
-        pane: &PaneId,
-        view: PaneView,
-        lines: u16,
-    ) -> Result<String, BackendError> {
-        let native = HerdrIds::native_pane(pane)?;
-        let requested = lines.to_string();
-
-        // Hyphens, not the underscores the socket schema spells these with. The
-        // CLI and the socket disagree about this one value.
-        let source = match view {
-            PaneView::Lines => "recent-unwrapped",
-            PaneView::Screen => "visible",
-        };
-
-        self.herdr.run(&[
-            "pane",
-            "read",
-            native,
-            "--source",
-            source,
-            "--lines",
-            &requested,
-            "--format",
-            "ansi",
-        ])
-    }
-
     /// The whole tree in one snapshot, for the machine port above.
     ///
     /// `TerminalPort` has no `list_workspaces` — `ListWorkspaces` is served
@@ -477,6 +474,31 @@ impl TerminalBackendTrait for HerdrBackend {
             .agent_session
             .as_ref()
             .and_then(Mapping::conversation_of))
+    }
+
+    /// Types the launch line at the pane and presses return, in one call.
+    ///
+    /// `pane run` rather than `send-text` plus an `enter` key: two calls are two
+    /// round trips with a shell prompt in between, and a pane that consumed the
+    /// text and then missed the return is left with a command line typed and not
+    /// run — which reads to a caller exactly like an agent that failed to start.
+    ///
+    /// The argv reaches herdr as separate arguments, so no shell of ours parses
+    /// it. It is built on this machine from `launch_command` and nothing a
+    /// client sent reaches it, which is what makes a line safe to type at a
+    /// shell at all.
+    fn type_agent_launch(
+        &self,
+        pane_id: &PaneId,
+        spawn: &AgentSpawn,
+    ) -> anyhow::Result<Option<ConversationId>> {
+        let native = HerdrIds::native_pane(pane_id)?;
+        let argv = spawn.agent.launch_command(spawn);
+        let args = Self::typed_launch_args(native, &argv)?;
+
+        self.herdr.run(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+
+        Ok(None)
     }
 
     /// herdr's own detection window, which is the region it watches to decide

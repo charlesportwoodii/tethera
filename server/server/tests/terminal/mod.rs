@@ -1,9 +1,12 @@
-mod drift;
 mod emulator;
 mod frames;
 mod herdr;
 mod keys;
+mod link;
 mod picker;
 mod prompt;
 mod pty;
+mod relay;
 mod session;
+mod shim;
+mod shim_screen;

@@ -33,6 +33,16 @@ pub struct Pane {
     /// neither set is an empty pane, both set is running and identified, and
     /// this one alone is running but unnamed.
     pub agent: Option<ProfileId>,
+    /// Whether this pane's output can be streamed to a client.
+    ///
+    /// True when a shim is relaying it. False for a pane that started before the
+    /// shim was in its shell — herdr still owns it and it is still on screen at
+    /// the desk, but nothing here can read it, so a client must draw it as
+    /// unavailable rather than let somebody tap into a refusal.
+    ///
+    /// Per pane rather than per machine, which is why it lives here and not in
+    /// the capability set: one machine has both kinds at once.
+    pub streamed: bool,
 }
 
 impl Pane {
@@ -55,6 +65,10 @@ impl Pane {
             foreground_command: None,
             conversation: None,
             agent: None,
+            // Set by the port, which is the only layer that knows whether a shim
+            // has adopted this pane. A backend builds panes without ever seeing
+            // the registry.
+            streamed: false,
         }
     }
 }

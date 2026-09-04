@@ -292,6 +292,7 @@ impl MachinePort for FakeMachine {
                     foreground_command: Some("claude".into()),
                     conversation: Some(bound_conversation()),
                     agent: None,
+                    streamed: false,
                 },
                 Pane {
                     id: PaneId::parse("pn_build").expect("valid"),
@@ -305,6 +306,7 @@ impl MachinePort for FakeMachine {
                     foreground_command: Some("cargo".into()),
                     conversation: None,
                     agent: None,
+                    streamed: false,
                 },
                 Pane {
                     id: PaneId::parse("pn_scratch").expect("valid"),
@@ -318,6 +320,7 @@ impl MachinePort for FakeMachine {
                     foreground_command: None,
                     conversation: None,
                     agent: None,
+                    streamed: false,
                 },
             ],
             conversations: vec![
@@ -716,6 +719,7 @@ impl TerminalPort for FakeTerminals {
             foreground_command: None,
             conversation: None,
             agent: None,
+            streamed: false,
         })
     }
 

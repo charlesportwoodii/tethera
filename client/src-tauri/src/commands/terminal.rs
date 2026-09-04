@@ -4,7 +4,6 @@ use tethera_client_core::rpc::Rpc;
 use tethera_common::protocol::capability::{self, HasCapability};
 use tethera_common::protocol::response::Payload;
 use tethera_common::protocol::terminal::{AttachSpec, Key, Mods, TerminalInput};
-use tethera_common::protocol::view::PaneView;
 use tethera_common::protocol::Request;
 use tethera_common::structs::client::{MachineTree, TerminalControls};
 use tethera_common::structs::ids::{PaneId, ServerId, TabId, WorkspaceId};
@@ -194,11 +193,9 @@ pub(crate) async fn terminal_controls(
         attach: has(capability::TERMINAL_ATTACH),
         input: has(capability::TERMINAL_INPUT),
         scrollback: has(capability::TERMINAL_SCROLLBACK),
-        streamed: has(capability::TERMINAL_STREAMED),
         open: has(capability::PANE_OPEN),
         split: has(capability::PANE_SPLIT),
         close: has(capability::PANE_CLOSE),
-        lines_view: has(capability::TERMINAL_LINES_VIEW),
         layout: has(capability::PANE_LAYOUT),
         focus_tab: has(capability::TAB_FOCUS),
     })
@@ -215,7 +212,6 @@ pub(crate) async fn attach_pane(
     state: State<'_, AppState>,
     server: String,
     pane: String,
-    view: PaneView,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -224,7 +220,6 @@ pub(crate) async fn attach_pane(
 
     let spec = AttachSpec {
         pane: Ids::pane(&pane)?,
-        view,
         viewport: Size { cols, rows },
     };
 

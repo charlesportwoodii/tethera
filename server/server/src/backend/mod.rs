@@ -11,7 +11,6 @@ use std::sync::Arc;
 use tethera_common::protocol::terminal::{Key, Mods};
 use tethera_common::structs::agent::AgentSpawn;
 use tethera_common::structs::ids::{ConversationId, PaneId, TabId, WorkspaceId};
-use tethera_common::protocol::view::PaneView;
 use tethera_common::structs::terminal::{Pane, Size, SplitDirection, Tab, TabLayout, Workspace};
 use tethera_common::traits::TerminalBackendTrait;
 
@@ -43,20 +42,6 @@ impl TerminalBackend {
         true
     }
 
-    /// Whether a pane's frames are the program's own bytes.
-    ///
-    /// Not the same question as `can_attach`, which is true for both. herdr
-    /// publishes no per-pane stream, so its panes are polled and the difference
-    /// between two reads is replayed — which carries the cells and loses
-    /// everything a repaint in place depends on. A pty is the program's own
-    /// bytes, in order, with nothing reconstructed.
-    ///
-    /// Advertised rather than inferred from the lines view, which happens to
-    /// have the same answer today for an unrelated reason.
-    pub fn can_stream(&self) -> bool {
-        matches!(self, Self::Pty(_))
-    }
-
     /// Whether this backend has a layout engine to split.
     ///
     /// Separate from `can_attach`, which used to stand in for it back when only
@@ -64,37 +49,6 @@ impl TerminalBackend {
     /// refuses a split and must not advertise one.
     pub fn can_split(&self) -> bool {
         matches!(self, Self::Herdr(_))
-    }
-
-    /// Whether this backend can return output with its wrapping removed.
-    ///
-    /// Only herdr can. A pty's bytes are already laid out for the pty's own
-    /// width, and un-wrapping them would need the emulator to record which line
-    /// breaks were autowrap and which were real - which `Buffer` does not track.
-    /// So a pty offers the pane as it stands and nothing else, and the client is
-    /// told rather than left to find out by switching to a view that silently
-    /// gives back the other one.
-    pub fn can_lines_view(&self) -> bool {
-        matches!(self, Self::Herdr(_))
-    }
-
-    /// A pane's current content, with styles, for the read loop above.
-    ///
-    /// Only herdr answers this. A pty pane is already streaming its own bytes,
-    /// so asking would be asking the wrong question rather than asking for
-    /// something unavailable, and the error says so.
-    pub fn read_screen(
-        &self,
-        pane: &PaneId,
-        view: PaneView,
-        lines: u16,
-    ) -> Result<String, BackendError> {
-        match self {
-            Self::Herdr(b) => b.read_screen(pane, view, lines),
-            Self::Pty(_) => Err(BackendError::message(
-                "a pty pane publishes its own bytes and is never read on a timer".to_string(),
-            )),
-        }
     }
 
     /// The geometry a pane gets when the backend cannot observe its own.
@@ -115,19 +69,6 @@ impl TerminalBackend {
             Self::Herdr(b) => b.tree(),
             Self::Pty(b) => b.tree(),
         }
-    }
-
-    /// Whether this backend's panes are read on a timer rather than pushing
-    /// their own bytes.
-    ///
-    /// What decides who owns a pane's feed. A pty adopts its pane into the
-    /// registry when it opens it and streams into it for life; a herdr pane has
-    /// no byte stream at all and is polled by a `HerdrSource` that starts at the
-    /// first attach. Asking `registry.holds` instead conflates the two: it is
-    /// true for a pty pane from the moment it exists, and true for a herdr pane
-    /// only once somebody has looked at it.
-    pub fn is_pulled(&self) -> bool {
-        matches!(self, Self::Herdr(_))
     }
 
     /// Whether this backend has a window whose focus a client could move.
@@ -243,6 +184,17 @@ impl TerminalBackendTrait for TerminalBackend {
         match self {
             Self::Herdr(b) => b.start_agent(pane_id, spawn),
             Self::Pty(b) => b.start_agent(pane_id, spawn),
+        }
+    }
+
+    fn type_agent_launch(
+        &self,
+        pane_id: &PaneId,
+        spawn: &AgentSpawn,
+    ) -> anyhow::Result<Option<ConversationId>> {
+        match self {
+            Self::Herdr(b) => b.type_agent_launch(pane_id, spawn),
+            Self::Pty(b) => b.type_agent_launch(pane_id, spawn),
         }
     }
 

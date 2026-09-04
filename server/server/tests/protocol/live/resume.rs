@@ -19,6 +19,7 @@ fn pane(cwd: Option<&str>, title: Option<&str>, agent: bool, named: bool) -> Pan
         foreground_command: None,
         conversation: named.then(|| ConversationId::mint("other")),
         agent: agent.then(|| ProfileId("claude".into())),
+        streamed: false,
     }
 }
 

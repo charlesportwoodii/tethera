@@ -28,8 +28,8 @@ fn negotiation_against_an_empty_list_is_none() {
 // struct fields and version two by adding one to `WatchOpen::Machine`, and
 // postcard writes a struct variant's fields as positionally as a struct's.
 #[test]
-fn this_build_speaks_version_three_and_nothing_older() {
-    assert_eq!(WireVersion::SUPPORTED, &[WireVersion(3)]);
+fn this_build_speaks_version_four_and_nothing_older() {
+    assert_eq!(WireVersion::SUPPORTED, &[WireVersion(4)]);
 }
 
 // The refusal an older client actually receives. Silent misdecoding is the

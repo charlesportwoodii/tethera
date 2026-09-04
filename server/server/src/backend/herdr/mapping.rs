@@ -122,6 +122,9 @@ impl Mapping {
             foreground_command: Self::command(info, foreground),
             conversation: Self::conversation(info),
             agent: Self::agent(info),
+            // Stamped by the port, which is the only layer holding both the tree
+            // and the registry a shim adopts into.
+            streamed: false,
         }
     }
 

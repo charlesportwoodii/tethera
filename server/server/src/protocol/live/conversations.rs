@@ -863,6 +863,17 @@ impl ConversationPort for LiveConversations {
 
             let binding = bindings.get(&Self::conversation_id(&session)).cloned();
 
+            // Live and Blocked are both properties of a bound conversation: an
+            // unbound one is reported Done whatever its records say, so neither
+            // filter can ever admit one. Deciding that here rather than after
+            // `describe` is what keeps these listings proportional to the number
+            // of panes instead of to the number of sessions the machine has ever
+            // recorded — a summary read and a transcript tail each, on a list the
+            // sweep re-runs every few seconds.
+            if binding.is_none() && !matches!(filter, ConversationFilter::All) {
+                continue;
+            }
+
             let Some(conversation) = self.describe(path, binding).await else {
                 continue;
             };
