@@ -66,7 +66,7 @@ impl LivePorts {
         db: Arc<DatabaseConnection>,
         endpoint_id: String,
     ) -> Self {
-        let terminals = LiveTerminals::from_config(&config);
+        let terminals = LiveTerminals::serving(&config);
         let assets_index = AssetIndex::new_shared();
         let conversations =
             LiveConversations::new_shared(

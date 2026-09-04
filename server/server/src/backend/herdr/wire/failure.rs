@@ -15,6 +15,7 @@ impl Failure {
     pub const WORKSPACE_NOT_FOUND: &'static str = "workspace_not_found";
     pub const TAB_NOT_FOUND: &'static str = "tab_not_found";
     pub const PANE_NOT_FOUND: &'static str = "pane_not_found";
+    pub const AGENT_PANE_BUSY: &'static str = "agent_pane_busy";
 
     /// The codes that name a missing entity keep their kind, because a caller
     /// distinguishes "this pane is gone" from "the backend broke". Everything
@@ -27,11 +28,17 @@ impl Failure {
             _ => None,
         };
 
+        let message = format!("herdr {}: {}", self.code, self.message);
+
         match kind {
             Some(kind) => BackendError::NotFound { kind },
-            None => BackendError::Backend {
-                message: format!("herdr {}: {}", self.code, self.message),
-            },
+            // Kept apart from `Backend` because a caller routes around this one.
+            // The code covers both "the shell is busy" and "that is not a shell
+            // I know", and a wrapped pane is always the second.
+            None if self.code == Self::AGENT_PANE_BUSY => {
+                BackendError::NotStartable { message }
+            }
+            None => BackendError::Backend { message },
         }
     }
 }

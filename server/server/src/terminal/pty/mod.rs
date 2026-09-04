@@ -158,6 +158,8 @@ impl PtyBackend {
             foreground_command: None,
             conversation: None,
             agent: None,
+            // Stamped by the port, which is the only layer that knows.
+            streamed: false,
         }
     }
 

@@ -18,6 +18,7 @@ function aPane(id: string, over: Partial<Pane> = {}): Pane {
     foreground_command: null,
     conversation: null,
     agent: null,
+    streamed: true,
     ...over,
   };
 }
@@ -25,6 +26,7 @@ function aPane(id: string, over: Partial<Pane> = {}): Pane {
 function anAgent(id: string, conversation: string): Pane {
   return aPane(id, {
     agent: "claude" as unknown as Pane["agent"],
+    streamed: true,
     conversation: conversation as unknown as Pane["conversation"],
   });
 }
@@ -44,11 +46,9 @@ const ALL: TerminalControls = {
   attach: true,
   input: true,
   scrollback: true,
-  streamed: true,
   open: true,
   split: true,
   close: true,
-  lines_view: true,
   layout: true,
   focus_tab: true,
 };

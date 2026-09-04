@@ -6,6 +6,7 @@ use tethera_common::protocol::handshake::{
     ClientInfo, DeviceRecord, Platform, RefuseReason, ServerInfo,
 };
 use tethera_common::structs::client::ServerEntry;
+use tethera_common::structs::conversation::ConversationFilter;
 use tethera_common::structs::ids::{DeviceId, ServerId};
 use tethera_common::structs::link::LinkKind;
 use tethera_common::structs::primitives::Timestamp;
@@ -181,11 +182,29 @@ async fn a_sweep_carries_back_what_the_machine_is_running() {
     );
 }
 
+// What is running, rather than what is newest on disk. `All` returns the newest
+// sessions the machine has recorded, so an agent blocked since Tuesday sits
+// behind a week of finished work and never reaches a row at all. Every status a
+// row can draw belongs to a bound conversation, which is what `Live` selects.
+#[tokio::test]
+async fn a_sweep_asks_for_the_conversations_that_are_running() {
+    let machine = FakeMachine::start_running(
+        Answer::Session,
+        vec![a_conversation("cv_one", "still going", true)],
+    )
+    .await;
+    let endpoint = an_endpoint().await;
+
+    let _rows = Sweep::run(&endpoint, vec![an_entry_for(&machine)], a_client(), a_budget()).await;
+
+    assert_eq!(machine.filters_asked(), vec![ConversationFilter::Live]);
+}
+
 // The list is a glance, not an index. A machine running more than a row can
 // show must not push the rest of the list off the screen.
 #[tokio::test]
 async fn a_row_carries_no_more_conversations_than_it_can_show() {
-    let many: Vec<Conversation> = (0..12)
+    let many: Vec<Conversation> = (0..20)
         .map(|n| a_conversation(&format!("cv_{n}"), "work", false))
         .collect();
     let machine = FakeMachine::start_running(Answer::Session, many).await;

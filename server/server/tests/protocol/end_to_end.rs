@@ -10,7 +10,6 @@ use tethera_common::protocol::transfer::{FetchSpec, PutSpec};
 use tethera_common::protocol::watch::{WatchEvent, WatchOpen, WatchSpec};
 use tethera_common::protocol::error::{EntityKind, WireError};
 use tethera_common::protocol::grid::TerminalGrid;
-use tethera_common::protocol::view::PaneView;
 use tethera_common::structs::conversation::ConversationFilter;
 use tethera_common::structs::ids::PaneId;
 use tethera_common::structs::terminal::Size;
@@ -240,7 +239,6 @@ async fn the_whole_protocol_over_one_connection() {
     let (mut input, mut frames) = harness
         .attach(AttachSpec {
             pane: fakes::agent_pane(),
-            view: PaneView::Screen,
             viewport: Size { cols: 80, rows: 24 },
         })
         .await;
@@ -433,7 +431,6 @@ async fn attaching_an_unknown_pane_closes_with_a_reason() {
     let (_input, mut frames) = harness
         .attach(AttachSpec {
             pane: PaneId::parse("pn_nothere").expect("valid"),
-            view: PaneView::Screen,
             viewport: Size { cols: 80, rows: 24 },
         })
         .await;

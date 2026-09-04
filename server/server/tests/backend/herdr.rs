@@ -2,9 +2,16 @@
 //!
 //! Everything here is a pure function over a string, so none of it needs herdr
 //! installed. The fixtures under `tests/fixtures/herdr/` were captured from
-//! `herdr 0.8.0-preview.2026-08-04-d78e3d3b5126`, socket API protocol 19, on a
-//! real session; the hand-authored ones are named for the hostile case they
-//! carry.
+//! `herdr 0.8.0-preview.2026-08-04-d78e3d3b5126`, socket API protocol 19, and
+//! from `herdr 0.8.2`, protocol 20, on real sessions; the hand-authored ones
+//! are named for the hostile case they carry. Paths, labels and session ids in
+//! the protocol 20 capture are rewritten.
+//!
+//! The three `pane-process-info-*` captures beyond the first come from
+//! `herdr 0.8.2-preview.2026-08-19-b5c4a0176e91` with a `default_shell` hook
+//! installed: one pane idle, one with `ping -n 30` running inside the shim —
+//! the same answer, which is the point of the second — and one caught in the
+//! window where a new pane has a `shell_pid` and no foreground list yet.
 
 use std::collections::BTreeMap;
 
@@ -17,7 +24,7 @@ use tethera_server_lib::backend::herdr::wire::{
     SnapshotBody,
 };
 use tethera_server_lib::backend::herdr::{HerdrIds, Mapping, ScrollbackWindow};
-use tethera_server_lib::backend::BackendError;
+use tethera_server_lib::backend::{BackendError, HerdrBackend};
 
 /// A captured herdr answer, read from disk.
 struct Fixture;
@@ -82,6 +89,62 @@ fn the_snapshot_answer_nests_its_payload_under_a_result_body() {
     assert_eq!(snapshot.tabs.len(), 7);
     assert_eq!(snapshot.panes.len(), 7);
     assert_eq!(snapshot.layouts.len(), 7);
+}
+
+#[test]
+fn both_protocols_in_the_field_decode_and_are_known() {
+    let old = Fixture::snapshot("snapshot.json");
+    let new = Fixture::snapshot("snapshot-20.json");
+
+    assert_eq!(old.protocol, 19);
+    assert_eq!(new.protocol, 20);
+    assert!(old.speaks_known_protocol());
+    assert!(new.speaks_known_protocol());
+
+    let ahead = Snapshot {
+        protocol: 21,
+        ..new
+    };
+
+    assert!(!ahead.speaks_known_protocol());
+}
+
+#[test]
+fn a_protocol_20_session_maps_to_the_tree_it_actually_had() {
+    let snapshot = Fixture::snapshot("snapshot-20.json");
+    let foreground = Fixture::empty_foreground();
+
+    let workspaces = Mapping::workspaces(&snapshot);
+    let ids: Vec<&str> = workspaces.iter().map(|w| w.id.as_str()).collect();
+
+    assert_eq!(ids, vec!["ws_w1M", "ws_w1N"]);
+
+    let panes = Mapping::panes(&snapshot, Some("w1M:t1"), &foreground, Fixture::DEFAULT);
+
+    assert_eq!(panes.len(), 1);
+    assert_eq!(panes[0].id.as_str(), "pn_w1M:p1");
+    assert_eq!(panes[0].size, Size { cols: 114, rows: 49 });
+    assert_eq!(
+        panes[0].title.as_deref(),
+        Some("Herdr protocol 20 alignment")
+    );
+}
+
+// The protocol 19 capture has no announced session on any pane, so the bound
+// case was only ever read from a hand-authored fixture until this one.
+#[test]
+fn a_protocol_20_pane_carries_the_session_its_agent_announced() {
+    let snapshot = Fixture::snapshot("snapshot-20.json");
+    let panes = Mapping::panes(&snapshot, None, &Fixture::empty_foreground(), Fixture::DEFAULT);
+
+    assert!(panes.iter().all(|pane| pane.agent.is_some()));
+    assert_eq!(
+        panes
+            .iter()
+            .filter_map(|pane| pane.conversation.as_ref())
+            .count(),
+        panes.len()
+    );
 }
 
 #[test]
@@ -687,4 +750,150 @@ fn a_request_for_the_whole_buffer_is_capped() {
     let window = ScrollbackWindow::plan(Some(u32::MAX), 500);
 
     assert_eq!(window.lines_to_request, ScrollbackWindow::MAX_LINES);
+}
+
+// A typed launch must ask herdr to type, not to start.
+//
+// `agent start` is the supervised route and it inspects the process herdr
+// spawned in the pane: measured against herdr 0.8.2, `available_pane_shell`
+// requires that process to carry one of fifteen known shell names and, on
+// Windows, to have no descendants at all. A pane whose shell is wrapped by the
+// shim fails both, and the refusal arrives as `agent_pane_busy` — "agent target
+// pane w6H:p1 is not an available shell" — however healthy the shell inside is.
+//
+// So a wrapped pane has exactly one route left, and this pins which one it is.
+// Reaching for `agent start` here costs the caller the whole readiness deadline
+// and then fails, which reads as a broken agent rather than a wrong call.
+#[test]
+fn a_typed_launch_asks_herdr_to_run_the_line_not_to_start_an_agent() {
+    let argv = vec!["claude".to_string(), "--permission-mode".to_string()];
+
+    let args = HerdrBackend::typed_launch_args("w6H:p1", &argv).expect("an argv names a binary");
+
+    assert_eq!(
+        args,
+        vec!["pane", "run", "w6H:p1", "claude", "--permission-mode"],
+        "a typed launch must go through `pane run`"
+    );
+}
+
+// The argv stays split all the way to herdr.
+//
+// herdr takes the command as trailing arguments, so a flag value carrying a
+// space survives. Joined into one string it would be re-split by whatever reads
+// it next, at a boundary nobody chose.
+#[test]
+fn a_typed_launch_keeps_an_argument_that_contains_a_space_whole() {
+    let argv = vec![
+        "claude".to_string(),
+        "--append-system-prompt".to_string(),
+        "be terse".to_string(),
+    ];
+
+    let args = HerdrBackend::typed_launch_args("w6H:p1", &argv).expect("an argv names a binary");
+
+    assert_eq!(args.last().map(String::as_str), Some("be terse"));
+}
+
+// An agent that names no binary is refused before herdr is called.
+//
+// `pane run` with no command is herdr's own usage error, which would reach a
+// client as a backend failure naming a CLI it never asked about.
+#[test]
+fn a_typed_launch_with_nothing_to_run_is_refused() {
+    let error = HerdrBackend::typed_launch_args("w6H:p1", &[])
+        .expect_err("an empty argv names no binary");
+
+    assert!(
+        error.to_string().contains("names no binary"),
+        "the refusal must name the cause: {error}"
+    );
+}
+
+// A pane whose shell herdr spawned as the shim is recognisable from the answer
+// herdr already gives, so any process can tell a structural `agent_pane_busy`
+// from a shell that is genuinely busy — including a CLI that holds no panes.
+#[test]
+fn a_pane_whose_shell_is_the_shim_is_recognised_from_herdrs_own_answer() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw(
+        "pane-process-info-shim-idle.json",
+    ))
+    .expect("envelope")
+    .into_result()
+    .expect("result");
+
+    assert_eq!(
+        body.process_info.shell_process_name().as_deref(),
+        Some("tethera-shim")
+    );
+    assert!(body.process_info.shell_is_process("tethera-shim"));
+    assert!(!body.process_info.shell_is_process("powershell"));
+}
+
+// A pane herdr has only just made reports a shell it cannot yet name, and that
+// is not the same answer as "no shim here".
+//
+// Captured from a real pane inside the window: `shell_pid` set,
+// `foreground_processes` absent. Measured empty at 31ms and filled at 57ms — and
+// an agent start on a freshly created pane arrives inside those 26ms, which is
+// what made `tethera agent spawn` fail intermittently while an established pane
+// worked every time.
+#[test]
+fn a_pane_whose_shell_is_not_yet_reported_answers_unknown_rather_than_no() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw(
+        "pane-process-info-shell-unreported.json",
+    ))
+    .expect("envelope")
+    .into_result()
+    .expect("result");
+
+    assert!(body.process_info.shell_pid.is_some());
+    assert_eq!(
+        body.process_info.shell_process_name(),
+        None,
+        "an unnamed shell must not read as a shell of some other name"
+    );
+    assert!(!body.process_info.shell_is_process("tethera-shim"));
+}
+
+// An ordinary pane is not mistaken for a wrapped one.
+//
+// The whole fallback hangs off this: a false positive types a launch line at a
+// pane herdr refused for the honest reason.
+#[test]
+fn a_pane_running_a_plain_shell_is_not_taken_for_a_wrapped_one() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw("pane-process-info.json"))
+        .expect("envelope")
+        .into_result()
+        .expect("result");
+
+    assert!(!body.process_info.shell_is_process("tethera-shim"));
+}
+
+// herdr cannot see inside the shim, and this pins that so nobody builds a busy
+// check on this answer.
+//
+// Captured with `ping -n 30 127.0.0.1` running under the shim and printing to
+// the pane: herdr still reports exactly one foreground process, the shim itself,
+// at `shell_pid`. Its tree walk starts at the process it spawned and does not
+// descend through a name it does not know.
+//
+// So a caller that types at a wrapped pane may type into whatever holds the
+// keyboard. Knowing that requires the shim to report it; it is not derivable
+// here.
+#[test]
+fn herdr_reports_the_shim_even_while_something_runs_inside_it() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw(
+        "pane-process-info-shim-busy.json",
+    ))
+    .expect("envelope")
+    .into_result()
+    .expect("result");
+
+    assert_eq!(body.process_info.foreground_processes.len(), 1);
+    assert_eq!(
+        body.process_info.command().as_deref(),
+        Some("tethera-shim"),
+        "if herdr ever starts reporting the inner process, a busy check becomes possible"
+    );
 }

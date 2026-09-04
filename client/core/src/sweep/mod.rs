@@ -39,7 +39,12 @@ impl Sweep {
     ///
     /// The list is a glance across every machine, not a full index. The rest are
     /// a page away, where they can be paged and sectioned properly.
-    pub const ROW_CONVERSATIONS: u16 = 5;
+    ///
+    /// Twelve rather than five because this is a `Live` listing. Five was a cap
+    /// on the newest sessions on disk, where the sixth was almost always
+    /// finished work; it is now a cap on what is actually running, where the
+    /// twelfth may be the one somebody is waiting on.
+    pub const ROW_CONVERSATIONS: u16 = 12;
 
     pub async fn run(
         endpoint: &ClientEndpoint,
@@ -153,7 +158,11 @@ impl Sweep {
         held: &[Conversation],
     ) -> Vec<Conversation> {
         let request = Request::ListConversations {
-            filter: ConversationFilter::All,
+            // What is running, rather than what is newest. An unbound
+            // conversation is reported Done whatever its records say, so an
+            // unfiltered listing spends the row's whole budget on finished work
+            // and hides the agent that is blocked behind it.
+            filter: ConversationFilter::Live,
             before: None,
             limit: Self::ROW_CONVERSATIONS,
         };
@@ -167,6 +176,39 @@ impl Sweep {
                 held.to_vec()
             }
         }
+    }
+
+    /// One line naming what every machine answered.
+    ///
+    /// For the log, and written here rather than at the caller so the caller
+    /// stays a command. It exists for the resume path: after a phone comes back
+    /// from suspension the only question worth an answer is whether the machines
+    /// are reachable again, and a row that says `offline` when the endpoint's
+    /// own sockets look healthy is what separates a dead transport from a
+    /// machine that is genuinely off.
+    pub fn summary(rows: &[ServerRow]) -> String {
+        if rows.is_empty() {
+            return "no machines paired".to_string();
+        }
+
+        rows.iter()
+            .map(|row| {
+                let label = &row.entry.server.label;
+
+                // A refusal outranks the link. The machine answered, so naming
+                // the path it answered over would send a reader to debug a
+                // network that is working.
+                if let Some(reason) = &row.refusal {
+                    return format!("{label}=refused({reason:?})");
+                }
+
+                match row.link.rtt_ms {
+                    Some(rtt) => format!("{label}={:?}/{rtt}ms", row.link.kind),
+                    None => format!("{label}={:?}", row.link.kind),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     fn offline(entry: ServerEntry) -> ServerRow {

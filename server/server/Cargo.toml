@@ -40,6 +40,8 @@ moka = { workspace = true }
 vte = { workspace = true }
 unicode-width = { workspace = true }
 portable-pty = { workspace = true }
+crossterm = { workspace = true }
+toml_edit = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

@@ -1,4 +1,3 @@
-use crate::protocol::view::PaneView;
 use crate::structs::ids::PaneId;
 use crate::structs::terminal::Size;
 use serde::{Deserialize, Serialize};
@@ -88,22 +87,35 @@ pub enum CloseReason {
     PaneGone,
     /// The server stopped serving this attach.
     ServerShutdown,
+    /// The channel carrying this pane ended, but the pane itself may not have.
+    ///
+    /// A relayed pane's stream belongs to a shim, and a shim can die, be
+    /// upgraded, or lose its channel while herdr keeps the pane and the shell
+    /// running. Saying `Exited` there would tell somebody their work is gone
+    /// when it is still on screen at the desk.
+    ///
+    /// Added last on purpose: postcard encodes a variant by index, so a variant
+    /// inserted above this line would silently renumber every one below it.
+    Disconnected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "./../../client/src/js/bindings/")]
 pub struct AttachSpec {
     pub pane: PaneId,
-    pub view: PaneView,
     /// What the client can draw.
     ///
-    /// Honoured in `Lines`, where the server lays logical lines out to this
-    /// width so the client never scrolls sideways. Ignored in `Screen`, where
-    /// the pane's own geometry is the only correct one and the client refits.
+    /// A claim, not advice. One shell is one pty and one pty is one size, so a
+    /// phone and a desk cannot both have the width they want — and the honest
+    /// resolution is to say who owns the session rather than to average two
+    /// answers into one nobody asked for. An attach hands the geometry to the
+    /// client; typing at the desk takes it back.
     ///
-    /// Carried on the attach because it is the only message that knows it, and
-    /// because the alternative - resizing the pane to suit the phone - reflows
-    /// it on the desk as well.
+    /// Sticky on purpose: the claim outlives the attach, because somebody who
+    /// locked their phone mid-command has not stopped caring what width that
+    /// command was laid out for.
+    ///
+    /// Carried on the attach because it is the only message that knows it.
     pub viewport: Size,
 }
 

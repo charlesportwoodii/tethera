@@ -12,7 +12,7 @@ use tethera_common::protocol::handshake::{
 use tethera_common::protocol::response::{Page, Payload, Response};
 use tethera_common::protocol::stream::StreamOpen;
 use tethera_common::protocol::{Request, WireVersion};
-use tethera_common::structs::conversation::Conversation;
+use tethera_common::structs::conversation::{Conversation, ConversationFilter};
 use tethera_common::structs::ids::{DeviceId, RequestId, ServerId};
 use tethera_common::structs::pairing::PairingOffer;
 use tethera_common::structs::primitives::Timestamp;
@@ -20,6 +20,8 @@ use tethera_transport::endpoint::TetheraEndpoint;
 use tethera_transport::error::TransportError;
 use tethera_transport::frame::FrameCodec;
 use tethera_transport::stream::FrameIo;
+
+use std::sync::{Arc, Mutex};
 
 /// What this machine does when a client says hello.
 #[derive(Debug, Clone)]
@@ -50,6 +52,11 @@ pub struct FakeMachine {
     /// What its printed offer says, which for an honest machine is the same id.
     /// Kept apart so a test can print one machine's QR and have another answer.
     offer_id: ServerId,
+    /// Which filters this machine has been asked for, in order.
+    ///
+    /// The sweep's choice of filter decides whether a long-running blocked agent
+    /// can reach a list row at all, and nothing else on the client observes it.
+    asked: Arc<Mutex<Vec<ConversationFilter>>>,
     _serve: tokio::task::JoinHandle<()>,
 }
 
@@ -97,6 +104,8 @@ impl FakeMachine {
 
         let serving = info.clone();
         let running = conversations.clone();
+        let asked: Arc<Mutex<Vec<ConversationFilter>>> = Arc::new(Mutex::new(Vec::new()));
+        let recording = Arc::clone(&asked);
         let handle = tokio::spawn(async move {
             let conversations = running;
             while let Ok(connection) = endpoint.accept().await {
@@ -116,6 +125,7 @@ impl FakeMachine {
                     answer,
                     info,
                     conversations.clone(),
+                    Arc::clone(&recording),
                     FrameCodec::default(),
                 )
                 .await;
@@ -127,8 +137,14 @@ impl FakeMachine {
             addr,
             info,
             offer_id,
+            asked,
             _serve: handle,
         }
+    }
+
+    /// Which filters this machine was asked for, in order.
+    pub fn filters_asked(&self) -> Vec<ConversationFilter> {
+        self.asked.lock().expect("the filter record").clone()
     }
 
     pub fn endpoint_id(&self) -> String {
@@ -168,6 +184,7 @@ impl FakeMachine {
         answer: Answer,
         info: ServerInfo,
         conversations: Vec<Conversation>,
+        asked: Arc<Mutex<Vec<ConversationFilter>>>,
         codec: FrameCodec,
     ) -> Result<(), TransportError> {
         let (mut send, mut recv) = connection
@@ -201,7 +218,7 @@ impl FakeMachine {
                 // The handshake is one stream of many. A real machine keeps
                 // serving the connection afterwards, and a fixture that stopped
                 // here would make every later request look like a dead machine.
-                Self::serve_requests(&connection, &conversations, refusing, &codec).await?;
+                Self::serve_requests(&connection, &conversations, &asked, refusing, &codec).await?;
             }
             Answer::Refuse(reason) => {
                 FrameIo::write(&mut send, &codec, &ServerHello::Refuse(reason)).await?;
@@ -244,6 +261,7 @@ impl FakeMachine {
     async fn serve_requests(
         connection: &iroh::endpoint::Connection,
         conversations: &[Conversation],
+        asked: &Mutex<Vec<ConversationFilter>>,
         refusing: bool,
         codec: &FrameCodec,
     ) -> Result<(), TransportError> {
@@ -262,7 +280,9 @@ impl FakeMachine {
                 _ if refusing => Response::Err(tethera_common::protocol::WireError::Backend {
                     message: "this machine cannot read agent transcripts".to_string(),
                 }),
-                Request::ListConversations { limit, .. } => {
+                Request::ListConversations { filter, limit, .. } => {
+                    asked.lock().expect("the filter record").push(filter);
+
                     let items: Vec<Conversation> =
                         conversations.iter().take(limit as usize).cloned().collect();
                     let has_earlier = items.len() < conversations.len();

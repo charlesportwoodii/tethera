@@ -4,7 +4,7 @@
   import { page } from "$app/state";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { Button, Chip, EmptyState, NavBar, TabStrip, TerminalView } from "$console";
+  import { Button, Chip, EmptyState, KeyStream, NavBar, TabStrip, TerminalView } from "$console";
   import ComposerRail from "$components/ComposerRail.svelte";
   import LayoutSheet from "$components/LayoutSheet.svelte";
   import { MachineManager } from "$managers/machine_manager";
@@ -12,32 +12,28 @@
   import type { Key } from "$bindings/Key";
   import type { Mods } from "$bindings/Mods";
   import type { Pane } from "$bindings/Pane";
-  import type { PaneView } from "$bindings/PaneView";
   import type { SplitDirection } from "$bindings/SplitDirection";
 
   /**
-   * How wide a pane is laid out for, in Lines.
+   * The geometry this screen claims for a pane it attaches to.
    *
-   * A character of the console's mono face at 11px is close to 6.6px, so a
-   * 393px phone fits about 58. Fixed rather than measured because a width that
-   * changed with the keyboard appearing would re-lay-out the pane underneath
-   * somebody mid-read.
+   * A claim on the pty, not a hint and not the grid's size. The grid sizes
+   * itself from whatever a snapshot says, so these two numbers only ever leave
+   * here in an `AttachSpec` — which is why they have to describe what a phone
+   * can actually draw. Claiming more rows than that resizes the pty to a height
+   * the desk's pane cannot show either: measured on a 91x39 pane, a 200-row
+   * claim put vim's status line 160 rows below the last visible one.
+   *
+   * A character of the console's mono face at 11px is close to 6.6px wide and
+   * 17px tall, so a 393px phone fits about 58 columns, and the space between the
+   * tab strip and the composer fits about 34 rows.
+   *
+   * Fixed rather than measured because a geometry that changed with the keyboard
+   * appearing would reflow the pane underneath somebody mid-read — and it would
+   * reflow it at the desk too, because there is one pty and it has one size.
    */
   const COLS = 58;
-
-  /**
-   * How much history the grid holds.
-   *
-   * Bounded by the frame cap rather than chosen freely: a snapshot's worst case
-   * is about cols x rows x 4 bytes, and FrameCodec refuses anything past 64 KiB.
-   * 58 x 200 leaves room for the style table and the envelope.
-   */
-  const ROWS = 200;
-
-  const READINGS: Array<{ id: PaneView; label: string }> = [
-    { id: "lines", label: "Lines" },
-    { id: "screen", label: "Screen" },
-  ];
+  const ROWS = 34;
 
   const server = page.url.searchParams.get("server") ?? "";
   const workspace = page.url.searchParams.get("workspace") ?? "";
@@ -63,7 +59,6 @@
   const revision = manager.revision;
   const live = manager.live;
   const failure = manager.error;
-  const view = manager.view;
   const controls = manager.controls;
   const treeError = tree.error;
 
@@ -305,29 +300,6 @@
     void manager.key(key, mods);
   }
 
-  let typed = $state("");
-
-  /**
-   * Sends the line, then Enter.
-   *
-   * Two messages rather than a newline inside the text: `Text` has every
-   * control character stripped out of it before it reaches a pane, so a
-   * trailing "\n" would arrive as nothing and the command would sit at the
-   * prompt unrun.
-   */
-  async function submit(): Promise<void> {
-    const line = typed;
-
-    if (line.length === 0) {
-      return;
-    }
-
-    typed = "";
-
-    await manager.text(line);
-    await manager.key("enter", 0);
-  }
-
   /**
    * The chat this terminal belongs to.
    *
@@ -468,13 +440,28 @@
 
         <div class="row">
           {#each panes as pane (pane.id)}
+            <!--
+              A pane with no shim cannot be shown at all, so it is drawn as
+              unavailable rather than left tappable. Tapping one answers with a
+              refusal, and a control that refuses on press teaches somebody that
+              the app is unreliable.
+            -->
             <Chip
               label={pane.foreground_command ?? pane.label}
               selected={(pane.id as unknown as string) === selectedPane}
-              onclick={() => void enterPane(pane.id as unknown as string)}
+              onclick={pane.streamed
+                ? () => void enterPane(pane.id as unknown as string)
+                : undefined}
             />
           {/each}
         </div>
+
+        {#if panes.some((pane) => !pane.streamed)}
+          <p class="note">
+            A pane that is not offered here started before the terminal shim, so nothing on this
+            machine can read it. Close it and open a new one, and it will stream.
+          </p>
+        {/if}
       </div>
     {:else if !entered}
       <!--
@@ -503,34 +490,6 @@
         <p class="note">Not following. Anything typed will not arrive.</p>
       {/if}
 
-      <!--
-        Said once, above the pane, rather than left to be discovered. This
-        machine re-reads the screen on a timer instead of carrying the program's
-        own bytes, so a program that repaints in place is appended to rather than
-        redrawn — somebody who opens an editor here watches it pile up screen
-        after screen and concludes the app is broken. The sentence is the whole
-        difference between that and knowing what you are looking at.
-      -->
-      {#if !$controls.streamed}
-        <p class="note">
-          This machine samples the screen rather than following it, so there is no cursor and a
-          full-screen program — an editor, a pager, top — will pile up instead of redrawing.
-          Commands and their output are what this shows.
-        </p>
-      {/if}
-
-      {#if $controls.lines_view}
-        <div class="row">
-          {#each READINGS as reading (reading.id)}
-            <Chip
-              label={reading.label}
-              selected={$view === reading.id}
-              onclick={() => void manager.setView(reading.id)}
-            />
-          {/each}
-        </div>
-      {/if}
-
       <TerminalView grid={manager.grid} revision={$revision} label={paneLabel} />
     {/if}
 
@@ -543,22 +502,9 @@
     />
 
     {#if entered && $controls.input}
-      <form
-        class="line"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void submit();
-        }}
-      >
-        <input
-          bind:value={typed}
-          placeholder="type a command"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck="false"
-        />
-        <Button type="submit" disabled={typed.length === 0}>Run</Button>
-      </form>
+      <div class="line">
+        <KeyStream ontext={(text) => void manager.text(text)} onkey={send} />
+      </div>
     {/if}
   {/if}
 </div>
@@ -594,32 +540,14 @@
     color: var(--tc-ink-3);
   }
 
+  // One row holding the keystream, which brings its own field styling from the
+  // console. Nothing here overrides it: a terminal's input is the console's to
+  // look after, and a screen restyling it is how two of them drift apart.
   .line {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 8px 16px;
-
-    // The console's Button is a full-width block by design - `width: 100%` - so
-    // in a flex row beside a field it takes the whole row and leaves the input a
-    // sliver. Overridden here rather than in the library, which is another
-    // team's and right for the way it is used everywhere else.
-    :global(.tc-button) {
-      flex: none;
-      width: auto;
-    }
-
-    input {
-      flex: 1;
-      min-width: 0;
-      padding: 8px 10px;
-      border: 1px solid var(--tc-line);
-      border-radius: var(--tc-r-chip);
-      background: var(--tc-surface);
-      color: var(--tc-ink);
-      font-family: var(--tc-mono);
-      font-size: 13px;
-    }
   }
 
   .over {

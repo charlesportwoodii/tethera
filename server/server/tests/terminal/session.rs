@@ -39,10 +39,9 @@ impl Harness {
         Self::open_from(size, PaneSource::Streamed)
     }
 
-    /// A pane whose screen is polled rather than streamed, as the herdr feed
-    /// adopts one.
-    fn sampled(size: Size) -> Self {
-        Self::open_from(size, PaneSource::Sampled)
+    /// A pane a shim is relaying, as `ShimRelay` adopts one.
+    fn relayed(size: Size) -> Self {
+        Self::open_from(size, PaneSource::Relayed)
     }
 
     fn open_from(size: Size, source: PaneSource) -> Self {
@@ -377,63 +376,7 @@ async fn a_second_attach_does_not_steal_the_first_ones_damage() {
     );
 }
 
-// A sampled pane's emulator always has a cursor - it sits wherever the replayed
-// text last landed - and that position is not the program's. Reporting it draws a
-// block on a phone at a column no read ever observed, which is the kind of wrong
-// that looks like output.
-#[tokio::test]
-async fn a_sampled_pane_opens_without_a_cursor() {
-    let harness = Harness::sampled(Size { cols: 20, rows: 4 });
-    let mut session = harness.attach();
 
-    harness.write(b"PS C:\\> ").await;
-
-    let frame = deadline(session.next_frame())
-        .await
-        .expect("a frame")
-        .expect("a frame");
-
-    match frame {
-        TerminalFrame::Snapshot { cursor, .. } => assert_eq!(cursor, None),
-        other => panic!("expected a snapshot, got {other:?}"),
-    }
-}
-
-// The same fact on the incremental path. A snapshot that withheld the cursor and
-// damage that reinstated it would put the block back within one poll interval.
-#[tokio::test]
-async fn a_sampled_pane_never_sends_a_cursor_on_damage() {
-    let harness = Harness::sampled(Size { cols: 20, rows: 4 });
-    let mut session = harness.attach();
-
-    // Clears the opening snapshot before the writes that matter.
-    let _ = deadline(session.next_frame()).await;
-
-    harness.write(b"one
-two
-").await;
-
-    let deadline_at = tokio::time::Instant::now() + Duration::from_secs(5);
-    let mut seen = 0;
-
-    while tokio::time::Instant::now() < deadline_at {
-        match tokio::time::timeout(Duration::from_millis(100), session.next_frame()).await {
-            Ok(Some(TerminalFrame::Snapshot { cursor, .. })) => {
-                assert_eq!(cursor, None);
-                seen += 1;
-            }
-            Ok(Some(TerminalFrame::Damage { cursor, .. })) => {
-                assert_eq!(cursor, None);
-                seen += 1;
-            }
-            Ok(Some(_)) => continue,
-            Ok(None) => break,
-            Err(_) => break,
-        }
-    }
-
-    assert!(seen > 0, "the pump never produced a frame to check");
-}
 
 // The other half of the contract: a pty owns its bytes, so its cursor is the
 // program's own and withholding it would break every full-screen program.
@@ -452,6 +395,68 @@ async fn a_streamed_pane_still_reports_its_cursor() {
     match frame {
         TerminalFrame::Snapshot { cursor, .. } => {
             assert!(cursor.is_some(), "a streamed pane must report its cursor");
+        }
+        other => panic!("expected a snapshot, got {other:?}"),
+    }
+}
+
+// The shim answers this pty's device queries, so the server must not. A second
+// reply travels the same downlink and arrives at the shell as though somebody
+// had typed it - `[1;1R` appearing at a prompt out of nowhere.
+#[tokio::test]
+async fn a_relayed_pane_sends_no_device_replies_back_to_its_pane() {
+    let mut harness = Harness::relayed(Size { cols: 20, rows: 4 });
+    let mut session = harness.attach();
+
+    let _ = deadline(session.next_frame()).await;
+
+    harness.write(b"[6n").await;
+    harness.settle(&mut session).await;
+
+    assert!(
+        harness.reader.try_recv().is_err(),
+        "the server answered a query the shim had already answered"
+    );
+}
+
+// A pty this process owns is the opposite case: nothing else is positioned to
+// answer, and a program that asks and is never told hangs. ConPTY asks before it
+// will run anything at all.
+#[tokio::test]
+async fn a_streamed_pane_answers_a_device_query_itself() {
+    let mut harness = Harness::open(Size { cols: 20, rows: 4 });
+    let mut session = harness.attach();
+
+    let _ = deadline(session.next_frame()).await;
+
+    harness.write(b"[6n").await;
+    harness.settle(&mut session).await;
+
+    let replied = harness.reader.try_recv().expect("a device reply");
+
+    assert!(
+        replied.starts_with(b"["),
+        "expected a report, got {replied:?}"
+    );
+}
+
+// Both remaining sources carry the program's own bytes, so both report a cursor.
+// The variant that could not was the polled one, and polling is gone.
+#[tokio::test]
+async fn a_relayed_pane_reports_its_cursor() {
+    let harness = Harness::relayed(Size { cols: 20, rows: 4 });
+    let mut session = harness.attach();
+
+    harness.write(b"hello").await;
+
+    let frame = deadline(session.next_frame())
+        .await
+        .expect("a frame")
+        .expect("a frame");
+
+    match frame {
+        TerminalFrame::Snapshot { cursor, .. } => {
+            assert!(cursor.is_some(), "a relayed pane must report its cursor");
         }
         other => panic!("expected a snapshot, got {other:?}"),
     }

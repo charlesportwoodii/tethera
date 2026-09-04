@@ -28,10 +28,16 @@ impl WireVersion {
     /// Version two ended the same way: `WatchOpen::Machine` gained a `layouts`
     /// field, and a struct variant's fields are as positional as a struct's.
     ///
+    /// Version three ended for both reasons at once. `Pane` gained `streamed`,
+    /// which is a field; and `AttachSpec` lost `view` when the scraped lines
+    /// view was deleted, which is a field removed — every field after it shifts
+    /// one position left, so a v3 client reads a pane's viewport out of the
+    /// bytes that used to be its view.
+    ///
     /// So an older client is refused by name at the handshake, which is the
     /// whole reason this number exists: the alternative is a phone decoding a
     /// pane into the wrong fields and drawing it.
-    pub const SUPPORTED: &'static [WireVersion] = &[WireVersion(3)];
+    pub const SUPPORTED: &'static [WireVersion] = &[WireVersion(4)];
 
     /// The highest version both sides speak, or `None` when they share none.
     ///

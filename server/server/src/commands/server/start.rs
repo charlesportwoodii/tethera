@@ -26,9 +26,10 @@ impl Config {
 
     // The child is given the resolved data dir rather than inheriting the
     // caller's environment, so a detached server keeps the state the operator
-    // asked for instead of falling back to the platform default. The label goes
-    // the same way; the relay token does not, because argv is readable.
-    fn detached_arguments(config: &ApplicationConfig) -> Vec<std::ffi::OsString> {
+    // asked for instead of falling back to the platform default. Every other
+    // resolved global goes the same way; the relay token does not, because argv
+    // is readable.
+    pub fn detached_arguments(config: &ApplicationConfig) -> Vec<std::ffi::OsString> {
         let mut arguments = vec![
             std::ffi::OsString::from("--data-dir"),
             config.data_dir.clone().into_os_string(),
@@ -42,6 +43,14 @@ impl Config {
         if let Some(url) = &config.relay_url {
             arguments.push(std::ffi::OsString::from("--relay-url"));
             arguments.push(std::ffi::OsString::from(url));
+        }
+
+        arguments.push(std::ffi::OsString::from("--bind-port"));
+        arguments.push(std::ffi::OsString::from(config.bind_port.to_string()));
+
+        if let Some(kind) = clap::ValueEnum::to_possible_value(&config.terminal_backend) {
+            arguments.push(std::ffi::OsString::from("--terminal-backend"));
+            arguments.push(std::ffi::OsString::from(kind.get_name()));
         }
 
         arguments.push(std::ffi::OsString::from("server"));

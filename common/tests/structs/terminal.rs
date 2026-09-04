@@ -17,6 +17,7 @@ fn a_pane() -> Pane {
         foreground_command: None,
         conversation: None,
         agent: None,
+        streamed: false,
     }
 }
 

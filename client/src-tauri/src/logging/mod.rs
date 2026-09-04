@@ -59,7 +59,22 @@ impl Logging {
             .with_target_level("iroh_relay", Self::DEPENDENCY_LEVEL)
             .with_target_level("hickory", Self::DEPENDENCY_LEVEL)
             .with_target_level("netwatch", Self::DEPENDENCY_LEVEL)
-            .with_target_level("portmapper", Self::DEPENDENCY_LEVEL);
+            .with_target_level("portmapper", Self::DEPENDENCY_LEVEL)
+            // Two exceptions to the cap above, and only these two. A phone that
+            // comes back from suspension has to rebind its sockets and reconnect
+            // its relay, and whether that happened is decided in exactly these
+            // places: `netwatch::netmon` says "no changes detected" when it
+            // compared the interfaces and saw nothing worth acting on, and
+            // iroh's `link_change` event fires when it did. Without both, a
+            // resume that failed and a resume that never looked are the same
+            // silence.
+            //
+            // A longer prefix wins over a shorter one here, which is what lets
+            // these sit under the crate-wide `Warn` rules rather than replacing
+            // them. Neither target is chatty: both speak only when the network
+            // is reported to have moved.
+            .with_target_level("netwatch::netmon", Level::Debug)
+            .with_target_level("iroh::_events::link_change", Level::Debug);
 
         tracing_subscriber::registry().with(bridge).init();
 

@@ -151,6 +151,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::lifecycle::resumed,
             commands::servers::list_servers,
             commands::servers::sweep_servers,
             commands::servers::forget_server,

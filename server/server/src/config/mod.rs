@@ -1,5 +1,7 @@
+mod herdr_config;
 mod terminal_kind;
 
+pub use herdr_config::HerdrConfig;
 pub use terminal_kind::TerminalKind;
 
 use directories::ProjectDirs;

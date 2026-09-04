@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "tauri": "tauri",
     "tauri:android:init": "tauri android init && node ../.github/scripts/install-android-overlay.js",
-    "tauri:ios:init": "tauri ios init && node ../.github/scripts/install-apple-overlay.js && node ../.github/scripts/patch-apple-plists.js && node ../.github/scripts/patch-entitlements.js"
+    "tauri:ios:init": "tauri ios init && node ../.github/scripts/install-apple-overlay.js && node ../.github/scripts/patch-apple-plists.js && node ../.github/scripts/patch-xcode-frameworks.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11",

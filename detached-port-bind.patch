@@ -1,0 +1,125 @@
+diff --git a/server/server/src/commands/server/mod.rs b/server/server/src/commands/server/mod.rs
+index 2ecbfa2..07113f3 100644
+--- a/server/server/src/commands/server/mod.rs
++++ b/server/server/src/commands/server/mod.rs
+@@ -1,5 +1,5 @@
+ mod process;
+-mod start;
++pub mod start;
+ mod status;
+ mod stop;
+ mod sub_command;
+diff --git a/server/server/src/commands/server/start.rs b/server/server/src/commands/server/start.rs
+index 74dc323..1aa254f 100644
+--- a/server/server/src/commands/server/start.rs
++++ b/server/server/src/commands/server/start.rs
+@@ -26,9 +26,10 @@ impl Config {
+ 
+     // The child is given the resolved data dir rather than inheriting the
+     // caller's environment, so a detached server keeps the state the operator
+-    // asked for instead of falling back to the platform default. The label goes
+-    // the same way; the relay token does not, because argv is readable.
+-    fn detached_arguments(config: &ApplicationConfig) -> Vec<std::ffi::OsString> {
++    // asked for instead of falling back to the platform default. Every other
++    // resolved global goes the same way; the relay token does not, because argv
++    // is readable.
++    pub fn detached_arguments(config: &ApplicationConfig) -> Vec<std::ffi::OsString> {
+         let mut arguments = vec![
+             std::ffi::OsString::from("--data-dir"),
+             config.data_dir.clone().into_os_string(),
+@@ -44,6 +45,14 @@ impl Config {
+             arguments.push(std::ffi::OsString::from(url));
+         }
+ 
++        arguments.push(std::ffi::OsString::from("--bind-port"));
++        arguments.push(std::ffi::OsString::from(config.bind_port.to_string()));
++
++        if let Some(kind) = clap::ValueEnum::to_possible_value(&config.terminal_backend) {
++            arguments.push(std::ffi::OsString::from("--terminal-backend"));
++            arguments.push(std::ffi::OsString::from(kind.get_name()));
++        }
++
+         arguments.push(std::ffi::OsString::from("server"));
+         arguments.push(std::ffi::OsString::from("start"));
+ 
+diff --git a/server/server/tests/commands/mod.rs b/server/server/tests/commands/mod.rs
+new file mode 100644
+index 0000000..31461fa
+--- /dev/null
++++ b/server/server/tests/commands/mod.rs
+@@ -0,0 +1 @@
++mod server_start;
+diff --git a/server/server/tests/commands/server_start.rs b/server/server/tests/commands/server_start.rs
+new file mode 100644
+index 0000000..8d0a3d9
+--- /dev/null
++++ b/server/server/tests/commands/server_start.rs
+@@ -0,0 +1,58 @@
++use clap::Parser;
++use tethera_server_lib::commands::server::start::Config as StartConfig;
++use tethera_server_lib::commands::server::ServerSubCommand;
++use tethera_server_lib::commands::{Cli, SubCommand};
++use tethera_server_lib::config::{ApplicationConfig, TerminalKind};
++
++fn parse_detached_child(config: &ApplicationConfig) -> Cli {
++    let mut argv = vec![std::ffi::OsString::from("tethera")];
++    argv.extend(StartConfig::detached_arguments(config));
++
++    Cli::try_parse_from(argv).expect("the detached child cannot parse its own argv")
++}
++
++fn start_command(cli: &Cli) -> &StartConfig {
++    match &cli.cmd {
++        SubCommand::Server(server) => match &server.cmd {
++            ServerSubCommand::Start(start) => start,
++            other => panic!("the detached child runs {other:?} instead of server start"),
++        },
++        other => panic!("the detached child runs {other:?} instead of server start"),
++    }
++}
++
++#[test]
++fn the_detached_child_reparses_every_global_the_parent_resolved() {
++    let mut config = ApplicationConfig::with_data_dir(std::path::PathBuf::from("/tmp/tethera-test"));
++    config.bind_port = 23890;
++    config.terminal_backend = TerminalKind::Pty;
++    config.label = Some("workshop".to_string());
++    config.relay_url = Some("https://relay.example".to_string());
++
++    let child = parse_detached_child(&config);
++
++    assert_eq!(child.bind_port, config.bind_port);
++    assert_eq!(child.terminal_backend, config.terminal_backend);
++    assert_eq!(child.data_dir, Some(config.data_dir.clone()));
++    assert_eq!(child.label, config.label);
++    assert_eq!(child.relay_url, config.relay_url);
++}
++
++#[test]
++fn the_detached_child_is_not_told_to_detach_again() {
++    let config = ApplicationConfig::with_data_dir(std::path::PathBuf::from("/tmp/tethera-test"));
++
++    let child = parse_detached_child(&config);
++
++    assert!(!start_command(&child).detach);
++}
++
++#[test]
++fn the_relay_token_never_reaches_the_detached_child_argv() {
++    let mut config = ApplicationConfig::with_data_dir(std::path::PathBuf::from("/tmp/tethera-test"));
++    config.relay_token = Some("shared-secret".to_string());
++
++    let argv = StartConfig::detached_arguments(&config);
++
++    assert!(!argv.iter().any(|argument| argument == "shared-secret"));
++}
+diff --git a/server/server/tests/integration.rs b/server/server/tests/integration.rs
+index 1d95975..379db0a 100644
+--- a/server/server/tests/integration.rs
++++ b/server/server/tests/integration.rs
+@@ -1,4 +1,5 @@
+ mod backend;
++mod commands;
+ mod config;
+ mod machine;
+ mod protocol;

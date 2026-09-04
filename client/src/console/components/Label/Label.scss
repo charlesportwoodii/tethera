@@ -15,4 +15,33 @@
   &.is-field {
     margin-bottom: 1px;
   }
+
+  // Only a ruled label becomes a row. Without this every existing caller would
+  // change from an inline word to a flex line for a feature it never asked for.
+  &.is-ruled {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  &[data-tone="urgent"] {
+    color: var(--tc-attn);
+  }
+}
+
+.tc-label__word {
+  flex: none;
+}
+
+.tc-label__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--tc-rule);
+}
+
+// Looser than the word it follows. A figure set at the word's tracking reads as
+// a fifth letter of it rather than as a count.
+.tc-label__count {
+  flex: none;
+  letter-spacing: 0.1em;
 }

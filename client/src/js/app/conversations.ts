@@ -1,6 +1,7 @@
 import type { Conversation } from "$bindings/Conversation";
 import type { AgentStatus } from "$bindings/AgentStatus";
 import type { GlyphState } from "$console/types/state";
+import { Parts } from "./parts";
 
 /**
  * How a conversation reads on a screen.
@@ -27,6 +28,23 @@ export class Conversations {
 
   static dormant(all: Conversation[]): Conversation[] {
     return all.filter((held) => !Conversations.isLive(held));
+  }
+
+  /**
+   * Whether releasing this conversation is an act the machine can perform.
+   *
+   * Releasing closes the pane — `ClosePane`, which the machine implements and
+   * advertises as `pane_close`. It does not end the agent: `StopConversation`
+   * reaches a port that answers "needs backend", and `conversation_stop` is
+   * deliberately not advertised, because closing a pane and ending an agent are
+   * different acts and only the first is written.
+   *
+   * So the transcript survives, the conversation becomes unbound, and the
+   * machine decides for itself whether it can be started again. That is why the
+   * control says Release rather than Stop, and why its undo is Resume.
+   */
+  static releasable(conversation: Conversation, reachable: boolean): boolean {
+    return reachable && Conversations.isLive(conversation);
   }
 
   /**
@@ -103,6 +121,18 @@ export class Conversations {
     return conversation.title ?? conversation.cwd;
   }
 
+  /**
+   * The machine's own one line, as plain text.
+   *
+   * The server decides what is meaningful — the pending question's prompt when
+   * blocked, the agent's last words otherwise — and it arrives as markdown,
+   * because that is what the agent wrote. Stripped here rather than at each
+   * call site so two screens cannot render the same sentence differently.
+   */
+  static preview(conversation: Conversation): string {
+    return Parts.plain(conversation.preview);
+  }
+
   /** When this conversation last did anything, as a local Date. */
   static when(conversation: Conversation): Date {
     const at = conversation.last_active ?? conversation.started_at;
@@ -135,7 +165,9 @@ export class Conversations {
         continue;
       }
 
-      groups.push({ label, items: [held] });
+      // Position, not the label: two groups may legitimately share a label, and
+      // the key has to tell them apart.
+      groups.push({ key: `${groups.length}:${label}`, label, items: [held] });
     }
 
     return groups;
@@ -179,6 +211,15 @@ export class Conversations {
 }
 
 export interface DayGroup {
+  /**
+   * Unique across the returned list, which the label is not.
+   *
+   * Rows arriving out of date order produce two groups reading "Today", by
+   * design. Keyed on the label, an `{#each}` over these hits Svelte's
+   * duplicate-key error and renders the whole block as nothing — silently, and
+   * only once real data has more than one day in it.
+   */
+  key: string;
   label: string;
   items: Conversation[];
 }

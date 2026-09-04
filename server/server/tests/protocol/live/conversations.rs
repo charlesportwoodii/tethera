@@ -196,6 +196,25 @@ async fn a_live_filter_over_a_machine_with_no_panes_is_empty() {
     assert!(listed.items.is_empty());
 }
 
+// Blocked is a bound conversation's state, and only a bound conversation's: an
+// unbound one is reported Done whatever its records say. Pinned because `list`
+// declines to read a summary and a transcript tail for an unbound session under
+// either narrowing filter, and that shortcut is only sound while this holds.
+#[tokio::test]
+async fn a_blocked_filter_over_a_machine_with_no_panes_is_empty() {
+    let machine = Machine::with(&[
+        ("-home-dev-one", "plain.jsonl"),
+        ("-home-dev-two", "tools.jsonl"),
+    ]);
+
+    let listed = machine
+        .conversations()
+        .list(ConversationFilter::Blocked, None, 10)
+        .await;
+
+    assert!(listed.items.is_empty());
+}
+
 #[tokio::test]
 async fn a_conversation_whose_records_are_not_on_disk_is_not_found() {
     let machine = Machine::with(&[("-home-dev-one", "plain.jsonl")]);

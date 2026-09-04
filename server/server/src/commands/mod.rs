@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 pub mod agent;
 pub mod device;
+pub mod herdr;
 pub mod pair;
 pub mod server;
+pub mod shim;
 
 #[derive(clap::Subcommand, Debug, Clone)]
 pub enum SubCommand {
@@ -17,6 +19,11 @@ pub enum SubCommand {
     Pair(pair::Config),
     /// Inspect and start agents
     Agent(agent::Config),
+    /// Run a shell inside a pty and copy it both ways, so a pane this process
+    /// does not own still has a readable byte stream
+    Shim(shim::Config),
+    /// Write herdr's own configuration, so its panes start under the shim
+    Herdr(herdr::Config),
 }
 
 #[derive(Debug, Parser, Clone)]
@@ -51,22 +58,94 @@ pub struct Cli {
 }
 
 impl Cli {
+    /// The file name that means "you are a pane's shell, not a CLI".
+    ///
+    /// herdr runs `default_shell` with **no arguments** — measured, by pointing
+    /// it at a script that logged its own argv and getting `ARGS:[]` — and it
+    /// discards any arguments written into the setting itself, so
+    /// `default_shell = "tethera.exe shim"` loses the subcommand.
+    ///
+    /// That leaves the binary's own name as the only channel. Invoked as
+    /// `tethera-shim`, it is a shell; invoked as `tethera`, it is the CLI, and a
+    /// bare `tethera` still prints its usage rather than silently becoming a
+    /// terminal.
+    ///
+    /// One build either way: the hook links or copies the installed binary to
+    /// this name rather than shipping a second one.
+    pub const SHIM_ARGV0: &'static str = crate::terminal::Shim::ARGV0;
+
+    /// Whether this process was invoked under the shim's name.
+    ///
+    /// Checked before `Cli::parse`, because a shell receives arguments that are
+    /// not this CLI's and clap would exit on them. A bare `tethera.exe` with no
+    /// subcommand is a usage error exiting 2 — which, as `default_shell`, killed
+    /// every new tab, split and agent start on the machine at once.
+    pub fn invoked_as_shim() -> bool {
+        std::env::args_os()
+            .next()
+            .map(std::path::PathBuf::from)
+            .and_then(|path| {
+                path.file_stem()
+                    .map(|stem| stem.to_string_lossy().to_ascii_lowercase())
+            })
+            .is_some_and(|stem| stem == Self::SHIM_ARGV0)
+    }
+
+    /// Runs as a pane's shell, taking every argument as the shell's.
+    ///
+    /// Never parses with clap. Whatever a terminal manager hands its shell
+    /// belongs to the shell.
+    pub async fn run_as_shim() {
+        let config = Arc::new(ApplicationConfig::default());
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        let command = shim::Config {
+            shell: None,
+            args,
+        };
+
+        if let Err(error) = command.run(config).await {
+            eprintln!("{error:#}");
+        }
+    }
+
+    /// Whether this invocation is a pane's shell rather than a command.
+    ///
+    /// The shim must reach a shell even when nothing else on this machine works,
+    /// so it is dispatched before the data-directory check that every other
+    /// subcommand genuinely needs. Once herdr's `default_shell` names this
+    /// binary, a full disk would otherwise leave the operator with panes that
+    /// have no shell at all.
+    pub fn is_shim(&self) -> bool {
+        matches!(self.cmd, SubCommand::Shim(_))
+    }
+
     pub async fn run() {
         let cli = Self::parse();
-        let config = cli.application_config();
+        let config = Arc::new(cli.application_config());
+
+        // Before `ensure_data_dir`, deliberately. `ShimLink::address` only builds
+        // a path, so a missing directory costs a failed dial and the shim runs
+        // the shell - which is the whole contract.
+        if let SubCommand::Shim(command) = &cli.cmd {
+            if let Err(error) = command.run(config).await {
+                eprintln!("{error:#}");
+            }
+
+            return;
+        }
 
         if let Err(error) = config.ensure_data_dir() {
             eprintln!("cannot create data directory: {error}");
             std::process::exit(1);
         }
 
-        let config = Arc::new(config);
-
         let result = match &cli.cmd {
             SubCommand::Server(command) => command.run(config).await,
             SubCommand::Device(command) => command.run(config).await,
             SubCommand::Pair(command) => command.run(config).await,
             SubCommand::Agent(command) => command.run(config).await,
+            SubCommand::Shim(command) => command.run(config).await,
+            SubCommand::Herdr(command) => command.run(config).await,
         };
 
         if let Err(error) = result {
