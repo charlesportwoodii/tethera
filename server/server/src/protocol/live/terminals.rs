@@ -98,14 +98,39 @@ impl LiveTerminals {
         Arc::new(Self::new(backend, panes))
     }
 
-    /// The terminal stack this machine's configuration asks for.
+    /// The terminal stack this machine's configuration asks for, without the
+    /// shim channel.
     ///
-    /// Assembled here rather than at each call site, so a binary that drives
-    /// panes without serving a connection — the CLI — reaches the same backend
-    /// the phone does, and a new backend kind is added in one place. The two
-    /// halves are built together because the pty backend adopts into the
-    /// registry as it opens a pane and cannot be constructed without it.
+    /// What a CLI wants. Only one process on the machine can hold the shim's
+    /// address — that is deliberate, and on Windows it is what
+    /// `first_pipe_instance` enforces — so a short-lived command that opened it
+    /// would either steal the server's channel or, as measured, print
+    /// `the shim channel stopped accepting … Access is denied` on every
+    /// invocation while achieving nothing. A CLI adopts no panes and serves no
+    /// frames; it has no use for the channel.
     pub fn from_config(config: &ApplicationConfig) -> Arc<Self> {
+        Self::assemble(config)
+    }
+
+    /// The same stack, plus the shim channel a serving process must own.
+    ///
+    /// Started here because this is where the registry a shim adopts into is
+    /// built. A pane announces itself whenever it opens, including one split by
+    /// hand at the desk, so there is nothing to discover and nothing to poll.
+    pub fn serving(config: &ApplicationConfig) -> Arc<Self> {
+        let port = Self::assemble(config);
+
+        ShimListener::spawn(port.relay(), ShimLink::address(&config.data_dir));
+
+        port
+    }
+
+    /// Assembled here rather than at each call site, so a binary that drives
+    /// panes without serving a connection reaches the same backend the phone
+    /// does, and a new backend kind is added in one place. The two halves are
+    /// built together because the pty backend adopts into the registry as it
+    /// opens a pane and cannot be constructed without it.
+    fn assemble(config: &ApplicationConfig) -> Arc<Self> {
         let panes = PaneRegistry::new_shared();
         let backend = Arc::new(match config.terminal_backend {
             TerminalKind::Herdr => {
@@ -118,15 +143,7 @@ impl LiveTerminals {
             ),
         });
 
-        let port = Self::new_shared(backend, panes);
-
-        // Started here because this is where the registry a shim adopts into is
-        // built. A pane announces itself whenever it opens, including one split
-        // by hand at the desk, so there is nothing to discover and nothing to
-        // poll.
-        ShimListener::spawn(port.relay(), ShimLink::address(&config.data_dir));
-
-        port
+        Self::new_shared(backend, panes)
     }
 
     /// The same port with the admission gate and the deadline named.
@@ -258,12 +275,11 @@ impl LiveTerminals {
     /// the ordinary deadline every start would be reported as `Busy` while the
     /// agent was still coming up.
     ///
-    /// A pane this registry holds takes the typed route instead. Its shell is
-    /// wrapped — by a shim relaying it, or by this server owning the pty
-    /// outright — and a multiplexer decides what it will start an agent in by
-    /// inspecting the process it spawned in the pane. A wrapper fails that
-    /// inspection whatever is running inside it, so asking for a supervised
-    /// start here would spend the whole deadline to arrive at a refusal.
+    /// A pane whose shell is wrapped is the backend's own problem to route
+    /// around, not this port's. Deciding it here would mean deciding it from
+    /// registry state, and the registry only knows the panes *this* process
+    /// holds — a short-lived CLI holds none, so every pane would look unwrapped
+    /// and take the one route that cannot work.
     pub async fn start_agent(
         &self,
         pane: &PaneId,
@@ -271,14 +287,9 @@ impl LiveTerminals {
     ) -> Result<Option<ConversationId>, WireError> {
         let pane = pane.clone();
         let spawn = spawn.clone();
-        let wrapped = self.panes.holds(&pane);
 
         self.run_within(Self::START_DEADLINE, move |backend| {
-            if wrapped {
-                backend.type_agent_launch(&pane, &spawn)
-            } else {
-                backend.start_agent(&pane, &spawn)
-            }
+            backend.start_agent(&pane, &spawn)
         })
         .await
     }

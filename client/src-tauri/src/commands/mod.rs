@@ -3,6 +3,7 @@
 // the function alone leaves them behind and the macro fails to resolve.
 pub(crate) mod assets;
 pub(crate) mod conversation;
+pub(crate) mod lifecycle;
 pub(crate) mod pairing;
 pub(crate) mod servers;
 pub(crate) mod settings;

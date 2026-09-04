@@ -47,6 +47,31 @@ fn a_valid_relay_url_is_carried_through() {
     assert!(addr.relay_urls().next().is_some());
 }
 
+// Both halves of what a resume does, in the order it does them. A reset that
+// hands back no resolver, or a hint that hangs, or either one leaving the
+// endpoint unable to dial, would turn every resume into the failure it is meant
+// to repair.
+#[tokio::test]
+async fn a_resume_resets_dns_takes_the_hint_and_leaves_the_endpoint_dialable() {
+    let machine = FakeMachine::start(Answer::Session).await;
+    let endpoint = ClientEndpoint::bind_local().await.expect("bind");
+
+    assert!(
+        endpoint.reset_dns(),
+        "a bound endpoint must have a resolver to reset"
+    );
+
+    assert!(
+        endpoint.network_change().await,
+        "a bound endpoint must take the hint within the deadline"
+    );
+
+    endpoint
+        .dial(&machine.endpoint_id(), None, &machine.direct_addrs())
+        .await
+        .expect("dial after a resume");
+}
+
 #[tokio::test]
 async fn a_dial_reaches_the_fake_machine() {
     let machine = FakeMachine::start(Answer::Session).await;

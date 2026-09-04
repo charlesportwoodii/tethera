@@ -116,16 +116,26 @@ export class Fleet {
   }
 
   /**
-   * Every machine's sessions in one column, newest first.
+   * Everything running, across every machine, newest first.
    *
-   * Quiet machines are kept. What a machine was doing when it went silent is
-   * the one useful fact on an otherwise empty row.
+   * Running, not remembered: a session with no pane is not doing anything, and a
+   * machine that is not answering has nothing anybody can see. Both belong on
+   * the machine page, which indexes what a machine *has*; this band answers the
+   * only question a dashboard is for, which is what is happening now.
+   *
+   * Uncapped, because that count is already bounded by what a sweep carries per
+   * machine, and truncating the answer to "what is running" would leave a
+   * session going with nothing on the screen to say so.
    */
-  static recent(rows: ServerRow[], limit: number): Waiting[] {
+  static active(rows: ServerRow[]): Waiting[] {
     return rows
-      .flatMap((row) => row.entry.conversations.map((conversation) => ({ row, conversation })))
-      .sort(Fleet.newestFirst)
-      .slice(0, limit);
+      .filter((row) => Fleet.reachable(row))
+      .flatMap((row) =>
+        row.entry.conversations
+          .filter((held) => Conversations.isLive(held))
+          .map((conversation) => ({ row, conversation })),
+      )
+      .sort(Fleet.newestFirst);
   }
 
   private static newestFirst(a: Waiting, b: Waiting): number {

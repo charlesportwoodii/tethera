@@ -71,32 +71,6 @@ pub trait TerminalBackendTrait {
         spawn: &AgentSpawn,
     ) -> anyhow::Result<Option<ConversationId>>;
 
-    /// Starts an agent by typing its launch line at the pane's shell.
-    ///
-    /// Typing and hoping, which is what `start_agent` exists to avoid — so this
-    /// is for the panes where a supervised start is not on offer at all, not a
-    /// simpler alternative to it.
-    ///
-    /// A multiplexer decides whether a pane is startable by inspecting the
-    /// process it spawned there, and a pane whose shell is wrapped fails that
-    /// inspection however healthy the shell inside is. Measured against herdr:
-    /// `available_pane_shell` requires the spawned process to carry one of
-    /// fifteen known shell names and, on Windows, to have no descendants at
-    /// all. A wrapper has one by definition. The refusal arrives as
-    /// `agent_pane_busy`, and no amount of retrying changes it.
-    ///
-    /// Returns `None` for the same reason a byte-stream backend does: nothing
-    /// here can tell a started agent from a shell that printed "command not
-    /// found". The multiplexer discovers the agent afterwards by its own means
-    /// — measured: herdr labels a pane `agent: claude` from process inspection
-    /// three levels below the shell it spawned — so the session identity
-    /// arrives on a later poll rather than in this answer.
-    fn type_agent_launch(
-        &self,
-        pane_id: &PaneId,
-        spawn: &AgentSpawn,
-    ) -> anyhow::Result<Option<ConversationId>>;
-
     /// Hands text to the agent running in a pane and submits it.
     ///
     /// Not `send_text` plus a carriage return: an agent's editor treats a

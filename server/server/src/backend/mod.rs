@@ -187,17 +187,6 @@ impl TerminalBackendTrait for TerminalBackend {
         }
     }
 
-    fn type_agent_launch(
-        &self,
-        pane_id: &PaneId,
-        spawn: &AgentSpawn,
-    ) -> anyhow::Result<Option<ConversationId>> {
-        match self {
-            Self::Herdr(b) => b.type_agent_launch(pane_id, spawn),
-            Self::Pty(b) => b.type_agent_launch(pane_id, spawn),
-        }
-    }
-
     fn submit_prompt(&self, pane_id: &PaneId, text: &str) -> anyhow::Result<()> {
         match self {
             Self::Herdr(b) => b.submit_prompt(pane_id, text),

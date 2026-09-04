@@ -11,14 +11,6 @@
   import type { Conversation } from "$bindings/Conversation";
   import type { ServerRow } from "$bindings/ServerRow";
 
-  /**
-   * How many sessions the column under the fleet shows.
-   *
-   * The fleet is what this screen is for; the sessions below it are a way in,
-   * not an index. The machine page pages the rest properly.
-   */
-  const SESSIONS_SHOWN = 5;
-
   const manager = new ServerManager(invoke);
   const rows = manager.rows;
   const sweeping = manager.sweeping;
@@ -27,7 +19,7 @@
   let unfollow: (() => void) | null = null;
 
   const waiting = $derived(Fleet.waiting($rows));
-  const sessions = $derived(Fleet.recent($rows, SESSIONS_SHOWN));
+  const active = $derived(Fleet.active($rows));
 
   onMount(() => {
     void start();
@@ -189,13 +181,15 @@
     {/each}
   </div>
 
-  <!-- Sessions rather than Recent. The sweep asks for what is bound to a pane,
-       so this column is what is running now, not what happened lately. -->
-  {#if sessions.length > 0}
-    <Label flush rule count={sessions.length}>Sessions</Label>
+  <!-- What is running, across every machine. Not an index: a session with no
+       pane, and everything a quiet machine was last seen doing, belong on the
+       machine page, which lists what a machine *has* rather than what it is
+       doing. This screen answers the other question. -->
+  {#if active.length > 0}
+    <Label flush rule count={active.length}>Active</Label>
 
     <div class="rows">
-      {#each sessions as held (held.conversation.id)}
+      {#each active as held (held.conversation.id)}
         <button class="line" type="button" onclick={() => read(held.row, held.conversation)}>
           <ConversationGlyph
             state={Conversations.glyph(held.conversation, held.row.link.kind !== "offline")}

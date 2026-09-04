@@ -16,6 +16,10 @@
 
   let release: (() => void) | null = null;
 
+  // When this app was last put away. Null on a cold launch, which is not a
+  // resume at all.
+  let hiddenAt: number | null = null;
+
   onMount(() => {
     void decide();
 
@@ -24,17 +28,17 @@
     // one where somebody else is holding it.
     const onVisible = () => {
       if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+
         void invoke("lock").catch(() => {});
 
         return;
       }
 
-      // A download interrupted by the switch away is asleep on a timer, and
-      // coming back is the moment worth acting on rather than whenever that
-      // timer expires. Told here rather than from a screen, because the
-      // transfer is not a screen's and the person may return to a different
-      // one from the one they left.
-      void invoke("resume_downloads").catch(() => {});
+      void woken();
+
+      // Not behind the resume: this decides whether anything paints at all, and
+      // a lock screen that arrives two seconds late is two seconds of blank.
       void decide();
     };
 
@@ -47,6 +51,30 @@
       release();
     }
   });
+
+  // Everything that has to happen, in order, when this app comes back.
+  //
+  // The order is the point. The Rust side was frozen for as long as this app
+  // was away: its NAT mappings have expired, its relay socket is gone, and the
+  // connections it holds still answer that they are open, so anything that
+  // reaches a machine before the transport has been told waits out its whole
+  // deadline and fails for a reason that reads like the machine being off.
+  //
+  // How long we were away is passed rather than measured over there, because
+  // only this side has a clock that kept running.
+  async function woken(): Promise<void> {
+    const hidden = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+    hiddenAt = null;
+
+    await invoke("resumed", { hidden }).catch(() => {});
+
+    // A download interrupted by the switch away is asleep on a timer, and
+    // coming back is the moment worth acting on rather than whenever that timer
+    // expires. Told here rather than from a screen, because the transfer is not
+    // a screen's and the person may return to a different one from the one they
+    // left.
+    await invoke("resume_downloads").catch(() => {});
+  }
 
   async function decide(): Promise<void> {
     try {

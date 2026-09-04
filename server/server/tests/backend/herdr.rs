@@ -6,6 +6,12 @@
 //! from `herdr 0.8.2`, protocol 20, on real sessions; the hand-authored ones
 //! are named for the hostile case they carry. Paths, labels and session ids in
 //! the protocol 20 capture are rewritten.
+//!
+//! The three `pane-process-info-*` captures beyond the first come from
+//! `herdr 0.8.2-preview.2026-08-19-b5c4a0176e91` with a `default_shell` hook
+//! installed: one pane idle, one with `ping -n 30` running inside the shim —
+//! the same answer, which is the point of the second — and one caught in the
+//! window where a new pane has a `shell_pid` and no foreground list yet.
 
 use std::collections::BTreeMap;
 
@@ -801,5 +807,93 @@ fn a_typed_launch_with_nothing_to_run_is_refused() {
     assert!(
         error.to_string().contains("names no binary"),
         "the refusal must name the cause: {error}"
+    );
+}
+
+// A pane whose shell herdr spawned as the shim is recognisable from the answer
+// herdr already gives, so any process can tell a structural `agent_pane_busy`
+// from a shell that is genuinely busy — including a CLI that holds no panes.
+#[test]
+fn a_pane_whose_shell_is_the_shim_is_recognised_from_herdrs_own_answer() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw(
+        "pane-process-info-shim-idle.json",
+    ))
+    .expect("envelope")
+    .into_result()
+    .expect("result");
+
+    assert_eq!(
+        body.process_info.shell_process_name().as_deref(),
+        Some("tethera-shim")
+    );
+    assert!(body.process_info.shell_is_process("tethera-shim"));
+    assert!(!body.process_info.shell_is_process("powershell"));
+}
+
+// A pane herdr has only just made reports a shell it cannot yet name, and that
+// is not the same answer as "no shim here".
+//
+// Captured from a real pane inside the window: `shell_pid` set,
+// `foreground_processes` absent. Measured empty at 31ms and filled at 57ms — and
+// an agent start on a freshly created pane arrives inside those 26ms, which is
+// what made `tethera agent spawn` fail intermittently while an established pane
+// worked every time.
+#[test]
+fn a_pane_whose_shell_is_not_yet_reported_answers_unknown_rather_than_no() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw(
+        "pane-process-info-shell-unreported.json",
+    ))
+    .expect("envelope")
+    .into_result()
+    .expect("result");
+
+    assert!(body.process_info.shell_pid.is_some());
+    assert_eq!(
+        body.process_info.shell_process_name(),
+        None,
+        "an unnamed shell must not read as a shell of some other name"
+    );
+    assert!(!body.process_info.shell_is_process("tethera-shim"));
+}
+
+// An ordinary pane is not mistaken for a wrapped one.
+//
+// The whole fallback hangs off this: a false positive types a launch line at a
+// pane herdr refused for the honest reason.
+#[test]
+fn a_pane_running_a_plain_shell_is_not_taken_for_a_wrapped_one() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw("pane-process-info.json"))
+        .expect("envelope")
+        .into_result()
+        .expect("result");
+
+    assert!(!body.process_info.shell_is_process("tethera-shim"));
+}
+
+// herdr cannot see inside the shim, and this pins that so nobody builds a busy
+// check on this answer.
+//
+// Captured with `ping -n 30 127.0.0.1` running under the shim and printing to
+// the pane: herdr still reports exactly one foreground process, the shim itself,
+// at `shell_pid`. Its tree walk starts at the process it spawned and does not
+// descend through a name it does not know.
+//
+// So a caller that types at a wrapped pane may type into whatever holds the
+// keyboard. Knowing that requires the shim to report it; it is not derivable
+// here.
+#[test]
+fn herdr_reports_the_shim_even_while_something_runs_inside_it() {
+    let body = Envelope::<ProcessInfoBody>::decode(&Fixture::raw(
+        "pane-process-info-shim-busy.json",
+    ))
+    .expect("envelope")
+    .into_result()
+    .expect("result");
+
+    assert_eq!(body.process_info.foreground_processes.len(), 1);
+    assert_eq!(
+        body.process_info.command().as_deref(),
+        Some("tethera-shim"),
+        "if herdr ever starts reporting the inner process, a busy check becomes possible"
     );
 }

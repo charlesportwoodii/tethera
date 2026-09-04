@@ -1,8 +1,13 @@
+mod health;
+
+pub use health::EndpointHealth;
+
 use crate::error::ClientError;
 use iroh::endpoint::Connection;
 use iroh::{EndpointAddr, EndpointId, RelayUrl};
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::time::Duration;
 use tethera_transport::endpoint::{EndpointConfig, TetheraEndpoint};
 
 /// This device's Iroh endpoint.
@@ -15,6 +20,14 @@ pub struct ClientEndpoint {
 }
 
 impl ClientEndpoint {
+    /// How long a network-change hint may take to be accepted.
+    ///
+    /// Short, because nothing waits on the answer: the hint reaches a socket
+    /// actor over a bounded channel, and an actor that cannot take it in two
+    /// seconds is wedged rather than busy. Saying so in the log is worth more
+    /// than waiting longer.
+    pub const NUDGE_DEADLINE: Duration = Duration::from_secs(2);
+
     pub async fn bind(config: EndpointConfig) -> Result<Self, ClientError> {
         let endpoint = TetheraEndpoint::bind(config)
             .await
@@ -29,6 +42,40 @@ impl ClientEndpoint {
 
     pub fn inner(&self) -> &TetheraEndpoint {
         &self.endpoint
+    }
+
+    /// Tells iroh to look at the network again.
+    ///
+    /// Called when this app returns to the foreground. A suspended phone comes
+    /// back with expired NAT mappings and a relay socket the operating system
+    /// reclaimed while it was frozen, and on iOS iroh's own wake detection is
+    /// switched off, so nothing else asks.
+    ///
+    /// Answers `false` when the hint was not taken within `NUDGE_DEADLINE`. The
+    /// deadline is the point: this runs on the path that returns the app to the
+    /// person, and a socket actor that is not answering must not hold the resume
+    /// behind it.
+    pub async fn network_change(&self) -> bool {
+        tokio::time::timeout(Self::NUDGE_DEADLINE, self.endpoint.network_change())
+            .await
+            .is_ok()
+    }
+
+    /// Rebuilds the DNS resolver so it reads the system nameservers again.
+    ///
+    /// Called on resume, and before the hint below rather than after: a rebind
+    /// and a relay reconnect both start by resolving a hostname, and doing them
+    /// against the resolver the phone came back with is what makes them fail
+    /// for a reason that reads like the machine being off.
+    ///
+    /// Answers `false` for a closed endpoint, which has no resolver to reset.
+    pub fn reset_dns(&self) -> bool {
+        self.endpoint.reset_dns()
+    }
+
+    /// This endpoint's sockets and relays, for the log.
+    pub fn health(&self) -> EndpointHealth {
+        EndpointHealth::new(self.endpoint.bound_sockets(), self.endpoint.home_relays())
     }
 
     /// Where to dial, from what a pairing offer or a remembered entry holds.

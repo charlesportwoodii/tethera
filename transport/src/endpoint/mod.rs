@@ -4,8 +4,8 @@ pub use config::EndpointConfig;
 
 use crate::alpn::Alpn;
 use crate::error::TransportError;
-use iroh::endpoint::{presets, Connection};
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMode};
+use iroh::endpoint::{presets, Connection, RelayStatus};
+use iroh::{Endpoint, EndpointAddr, EndpointId, RelayConfig, RelayMode, Watcher};
 use std::net::{Ipv4Addr, SocketAddr};
 
 pub struct TetheraEndpoint {
@@ -58,6 +58,60 @@ impl TetheraEndpoint {
 
     pub fn inner(&self) -> &Endpoint {
         &self.endpoint
+    }
+
+    /// Tells iroh the network may have moved underneath it.
+    ///
+    /// iroh detects most changes itself, but not on every platform: `netwatch`
+    /// widens its wall-clock poll to an hour on iOS and Android to spare the
+    /// radio, and says in its own source that sleep detection does not work
+    /// there as a result. A phone that was suspended comes back with expired NAT
+    /// mappings and a dead relay socket, and iroh has nothing to tell it so.
+    ///
+    /// This asks it to look again. It is a hint and not a command: iroh compares
+    /// the interfaces it finds against the ones it held, and a phone that
+    /// resumed onto the same network with the same address is not a change it
+    /// will act on.
+    pub async fn network_change(&self) {
+        self.endpoint.network_change().await;
+    }
+
+    /// Rebuilds the DNS resolver from the system configuration.
+    ///
+    /// The resolver reads the host's nameservers once, when it is built, and
+    /// keeps them. A phone that moved network while this process was frozen
+    /// comes back holding nameservers that are no longer reachable, and every
+    /// lookup then fails with `no calls succeeded` — which takes the relay with
+    /// it, because the relay is named by hostname. Nothing recovers on its own:
+    /// iroh resets the resolver in exactly one place, behind the same major
+    /// network change that a resumed phone does not report.
+    ///
+    /// Answers `false` when the endpoint has no resolver to reset, which is a
+    /// closed endpoint.
+    pub fn reset_dns(&self) -> bool {
+        match self.endpoint.dns_resolver() {
+            Ok(resolver) => {
+                resolver.reset();
+
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The UDP sockets this endpoint is bound to right now.
+    pub fn bound_sockets(&self) -> Vec<SocketAddr> {
+        self.endpoint.bound_sockets()
+    }
+
+    /// Each home relay this endpoint knows, and whether it is connected.
+    ///
+    /// Empty until a relay has been selected, which is not the same as
+    /// disconnected — see `Endpoint::home_relay_status`.
+    pub fn home_relays(&self) -> Vec<RelayStatus> {
+        let mut status = self.endpoint.home_relay_status();
+
+        status.get()
     }
 
     /// Accepts one connection.

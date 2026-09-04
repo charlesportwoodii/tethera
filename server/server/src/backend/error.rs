@@ -16,6 +16,16 @@ pub enum BackendError {
     Busy,
     #[error("{message}")]
     Backend { message: String },
+    /// The multiplexer will not start an agent in this pane.
+    ///
+    /// Its own variant because the cause is ambiguous and the two readings need
+    /// different handling. herdr reports `agent_pane_busy` both for a pane whose
+    /// shell is running something and for a pane whose shell it does not
+    /// recognise — which includes every pane the shim wraps. One is a refusal to
+    /// respect, the other is a refusal to route around, and only the caller with
+    /// the pane in front of it can tell them apart.
+    #[error("{message}")]
+    NotStartable { message: String },
 }
 
 impl BackendError {
@@ -30,6 +40,7 @@ impl BackendError {
             Self::NotFound { kind } => WireError::NotFound { kind },
             Self::Busy => WireError::Busy,
             Self::Backend { message } => WireError::Backend { message },
+            Self::NotStartable { message } => WireError::Backend { message },
         }
     }
 

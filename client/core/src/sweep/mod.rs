@@ -178,6 +178,39 @@ impl Sweep {
         }
     }
 
+    /// One line naming what every machine answered.
+    ///
+    /// For the log, and written here rather than at the caller so the caller
+    /// stays a command. It exists for the resume path: after a phone comes back
+    /// from suspension the only question worth an answer is whether the machines
+    /// are reachable again, and a row that says `offline` when the endpoint's
+    /// own sockets look healthy is what separates a dead transport from a
+    /// machine that is genuinely off.
+    pub fn summary(rows: &[ServerRow]) -> String {
+        if rows.is_empty() {
+            return "no machines paired".to_string();
+        }
+
+        rows.iter()
+            .map(|row| {
+                let label = &row.entry.server.label;
+
+                // A refusal outranks the link. The machine answered, so naming
+                // the path it answered over would send a reader to debug a
+                // network that is working.
+                if let Some(reason) = &row.refusal {
+                    return format!("{label}=refused({reason:?})");
+                }
+
+                match row.link.rtt_ms {
+                    Some(rtt) => format!("{label}={:?}/{rtt}ms", row.link.kind),
+                    None => format!("{label}={:?}", row.link.kind),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     fn offline(entry: ServerEntry) -> ServerRow {
         ServerRow {
             entry,

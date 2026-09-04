@@ -156,8 +156,8 @@ describe("Fleet.waiting", () => {
   });
 });
 
-describe("Fleet.recent", () => {
-  test("interleaves every machine's sessions newest first and caps them", () => {
+describe("Fleet.active", () => {
+  test("gathers what is running across every machine, newest first", () => {
     const rows = [
       a_row("thalira", false, [
         a_conversation("a", "working", true, 50),
@@ -166,12 +166,34 @@ describe("Fleet.recent", () => {
       a_row("noble2", false, [a_conversation("c", "working", true, 30)]),
     ];
 
-    expect(Fleet.recent(rows, 2).map((held) => held.conversation.id)).toEqual(["a", "c"]);
+    expect(Fleet.active(rows).map((held) => held.conversation.id)).toEqual(["a", "c", "b"]);
   });
 
-  test("still lists a quiet machine's remembered work, which is all it has", () => {
-    const rows = [a_row("bastion", true, [a_conversation("a", "idle", true, 10)])];
+  // The dashboard answers "what is running". A session with no pane is not
+  // running, and it has its own home on the machine page, which is the index of
+  // what a machine has rather than of what it is doing.
+  test("leaves out a session with no pane", () => {
+    const rows = [
+      a_row("thalira", false, [
+        a_conversation("a", "working", true, 20),
+        a_conversation("b", "done", false, 10),
+      ]),
+    ];
 
-    expect(Fleet.recent(rows, 5).map((held) => held.conversation.id)).toEqual(["a"]);
+    expect(Fleet.active(rows).map((held) => held.conversation.id)).toEqual(["a"]);
+  });
+
+  // A machine that is not answering has nothing running that anybody can see.
+  // Its remembered work is what the tile's own sentence is for.
+  test("leaves out a machine that is not answering", () => {
+    const rows = [a_row("bastion", true, [a_conversation("a", "working", true, 10)])];
+
+    expect(Fleet.active(rows)).toEqual([]);
+  });
+
+  test("is empty when nothing anywhere is running", () => {
+    const rows = [a_row("thalira", false, [a_conversation("a", "done", false, 10)])];
+
+    expect(Fleet.active(rows)).toEqual([]);
   });
 });

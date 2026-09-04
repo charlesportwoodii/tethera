@@ -42,6 +42,13 @@ pub(crate) async fn sweep_servers(state: State<'_, AppState>) -> Result<Vec<Serv
     )
     .await;
 
+    // The one sweep after a resume is the answer to whether the resume worked.
+    // Every other sweep is the list doing its job every five seconds, and
+    // logging those would rotate this one away.
+    if state.took_resume() {
+        log::info!("sweep after resume: {}", Sweep::summary(&rows));
+    }
+
     // Only a machine that answered is written back. A row that timed out carries
     // the entry unchanged, so persisting it would rewrite the file on every
     // sweep for no change.

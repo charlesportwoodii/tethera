@@ -56,8 +56,123 @@ impl HerdrBackend {
     /// needs rather than a wait that never ends.
     pub const READY_TIMEOUT_MS: u32 = 20_000;
 
+    /// How many times to ask herdr what a pane's shell is before giving up.
+    ///
+    /// Six at 50ms covers 300ms against a gap measured at 26ms. The cost is
+    /// paid only on a refusal, and only until the answer arrives.
+    const WRAPPED_ATTEMPTS: u8 = 6;
+    const WRAPPED_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+    /// How often to ask herdr whether it has attributed a session to a pane a
+    /// launch line was typed at.
+    ///
+    /// Measured: a Claude Code start under the shim was reported with its
+    /// session id inside twelve seconds, well within `READY_TIMEOUT_MS`.
+    const SESSION_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
     pub fn default_size(&self) -> Size {
         self.default_size
+    }
+
+    /// Whether the shim owns this pane's shell.
+    ///
+    /// Asked of herdr rather than read from a registry, because the answer must
+    /// not depend on which process is asking. A short-lived CLI holds no pane
+    /// and would see every one of them as unwrapped — which is how
+    /// `tethera agent spawn` came to fail on a machine where the hook was
+    /// installed, taking the one route that cannot work.
+    ///
+    /// Polled, because a pane that has just been created has a `shell_pid` and
+    /// no foreground list yet — and an agent start arrives inside that window.
+    /// Measured: empty at 31ms, filled at 57ms.
+    ///
+    /// False once a name is known and is not the shim, or if herdr cannot
+    /// answer at all. A pane this cannot read is a pane whose refusal stands.
+    fn wrapped(&self, native_pane: &str) -> bool {
+        for attempt in 0..Self::WRAPPED_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(Self::WRAPPED_INTERVAL);
+            }
+
+            let Ok(body) = self
+                .herdr
+                .run_json::<wire::ProcessInfoBody>(&["pane", "process-info", "--pane", native_pane])
+            else {
+                return false;
+            };
+
+            if let Some(name) = body.process_info.shell_process_name() {
+                return name == crate::terminal::Shim::ARGV0;
+            }
+        }
+
+        false
+    }
+
+    /// Types the launch line at the pane and presses return, in one call.
+    ///
+    /// `pane run` rather than `send-text` plus an `enter` key: two calls are two
+    /// round trips with a shell prompt in between, and a pane that consumed the
+    /// text and then missed the return is left with a command line typed and not
+    /// run — which reads to a caller exactly like an agent that failed to start.
+    ///
+    /// The argv reaches herdr as separate arguments, so no shell of ours parses
+    /// it. It is built on this machine from `launch_command` and nothing a
+    /// client sent reaches it, which is what makes a line safe to type at a
+    /// shell at all.
+    ///
+    /// Then waits for the session, so this answers the same shape a supervised
+    /// start does. herdr finds the agent on its own — measured through the
+    /// shim, three levels below the pane's shell — but only after the agent has
+    /// come up, and returning `None` before then reports a start that worked as
+    /// a conversation with no agent.
+    fn type_agent_launch(
+        &self,
+        pane_id: &PaneId,
+        spawn: &AgentSpawn,
+    ) -> anyhow::Result<Option<ConversationId>> {
+        let native = HerdrIds::native_pane(pane_id)?;
+        let argv = spawn.agent.launch_command(spawn);
+        let args = Self::typed_launch_args(native, &argv)?;
+
+        self.herdr.run(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+
+        Ok(self.await_session(native))
+    }
+
+    /// The conversation herdr eventually attributes to this pane.
+    ///
+    /// `None` when it never does, which is a real answer and not a failure: an
+    /// agent that stops at its own trust prompt is running and has begun no
+    /// session. The caller cannot tell that from one that is merely slow, which
+    /// is why this bounds the wait rather than reporting a timeout.
+    ///
+    /// Errors are swallowed on purpose. `agent get` refuses a pane herdr does
+    /// not yet consider an agent terminal, and that is the ordinary state for
+    /// most of this wait.
+    fn await_session(&self, native_pane: &str) -> Option<ConversationId> {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(Self::READY_TIMEOUT_MS.into());
+
+        while std::time::Instant::now() < deadline {
+            if let Ok(body) = self
+                .herdr
+                .run_json::<wire::AgentBody>(&["agent", "get", native_pane])
+            {
+                if let Some(conversation) = body
+                    .agent
+                    .agent_session
+                    .as_ref()
+                    .and_then(Mapping::conversation_of)
+                {
+                    return Some(conversation);
+                }
+            }
+
+            std::thread::sleep(Self::SESSION_INTERVAL);
+        }
+
+        None
     }
 
     /// The herdr call that types a launch line at a pane and runs it.
@@ -467,38 +582,28 @@ impl TerminalBackendTrait for HerdrBackend {
             args.extend(flags.iter().map(String::as_str));
         }
 
-        let body: wire::AgentBody = self.herdr.run_json(&args)?;
+        let started: Result<wire::AgentBody, _> = self.herdr.run_json(&args);
+
+        let body = match started {
+            Ok(body) => body,
+            // A refusal the shim explains is routed around. Any other refusal is
+            // a pane genuinely running something, and typing a launch line into
+            // that would put it wherever the keyboard already is.
+            Err(BackendError::NotStartable { message }) => {
+                if self.wrapped(native) {
+                    return self.type_agent_launch(pane_id, spawn);
+                }
+
+                return Err(BackendError::NotStartable { message }.into());
+            }
+            Err(error) => return Err(error.into()),
+        };
 
         Ok(body
             .agent
             .agent_session
             .as_ref()
             .and_then(Mapping::conversation_of))
-    }
-
-    /// Types the launch line at the pane and presses return, in one call.
-    ///
-    /// `pane run` rather than `send-text` plus an `enter` key: two calls are two
-    /// round trips with a shell prompt in between, and a pane that consumed the
-    /// text and then missed the return is left with a command line typed and not
-    /// run — which reads to a caller exactly like an agent that failed to start.
-    ///
-    /// The argv reaches herdr as separate arguments, so no shell of ours parses
-    /// it. It is built on this machine from `launch_command` and nothing a
-    /// client sent reaches it, which is what makes a line safe to type at a
-    /// shell at all.
-    fn type_agent_launch(
-        &self,
-        pane_id: &PaneId,
-        spawn: &AgentSpawn,
-    ) -> anyhow::Result<Option<ConversationId>> {
-        let native = HerdrIds::native_pane(pane_id)?;
-        let argv = spawn.agent.launch_command(spawn);
-        let args = Self::typed_launch_args(native, &argv)?;
-
-        self.herdr.run(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
-
-        Ok(None)
     }
 
     /// herdr's own detection window, which is the region it watches to decide

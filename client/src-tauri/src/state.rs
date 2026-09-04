@@ -12,6 +12,7 @@ use crate::panes::PaneAttachments;
 use crate::machine_watch::MachineWatch;
 use crate::watches::ConversationWatches;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 pub struct AppState {
@@ -39,6 +40,13 @@ pub struct AppState {
     live: Mutex<HashMap<String, Connection>>,
     settings: SettingsStore,
     downloads: Downloads,
+    /// Set by `resumed` and taken by the next sweep, so the log carries the one
+    /// pass whose outcome answers whether the resume recovered the transport.
+    ///
+    /// A flag rather than a line on every sweep: the list sweeps every five
+    /// seconds for as long as it is open, and a log that records all of them
+    /// rotates the interesting pass away before anybody reads it.
+    resumed: AtomicBool,
 }
 
 impl AppState {
@@ -64,6 +72,7 @@ impl AppState {
             live: Mutex::new(HashMap::new()),
             settings,
             downloads,
+            resumed: AtomicBool::new(false),
         }
     }
 
@@ -165,6 +174,69 @@ impl AppState {
         live.insert(id.as_str().to_owned(), connection.clone());
 
         Ok(connection)
+    }
+
+    /// Called when this app returns to the foreground.
+    ///
+    /// Two things are wrong with the transport at this moment, and neither
+    /// announces itself. iroh has been frozen for as long as the phone was
+    /// away, so its NAT mappings have expired and the relay socket the
+    /// operating system reclaimed has not been noticed — and on iOS iroh's own
+    /// wake detection is switched off, so nothing tells it to look. The cached
+    /// connections, meanwhile, still answer `close_reason() == None`, so
+    /// `connect` would hand back a connection whose path is gone and every
+    /// request on it would wait out the full deadline.
+    ///
+    /// So: hint, then forget. Neither is expensive, and this is the one moment
+    /// where both are certainly needed.
+    ///
+    /// The log lines are the point of the shape. A resume either recovered the
+    /// transport or it did not, and from the screen the two are the same picture
+    /// of a machine that will not answer.
+    pub async fn resumed(&self, hidden: u64) {
+        log::info!(
+            "resumed after {hidden}ms hidden; endpoint {}",
+            self.endpoint.health()
+        );
+
+        // First, because everything after it resolves a hostname. The device's
+        // own log is what put this in front of the hint: minutes of `Failed to
+        // connect to relay server: unable to connect: Resolve failed` while the
+        // phone plainly had a network, because the resolver still held the
+        // nameservers from before it was suspended.
+        if !self.endpoint.reset_dns() {
+            log::warn!("the endpoint has no dns resolver to reset; it is closed");
+        }
+
+        if !self.endpoint.network_change().await {
+            log::warn!(
+                "the network-change hint was not taken within {:?}; the socket actor is not answering",
+                ClientEndpoint::NUDGE_DEADLINE
+            );
+        }
+
+        let dropped = {
+            let mut live = self.live.lock().await;
+            let held = live.len();
+
+            live.clear();
+
+            held
+        };
+
+        self.resumed.store(true, Ordering::SeqCst);
+
+        log::info!(
+            "dropped {dropped} cached connection(s) on resume; endpoint {}",
+            self.endpoint.health()
+        );
+    }
+
+    /// Whether a resume has happened that no sweep has reported on yet.
+    ///
+    /// Takes the flag, so exactly one sweep carries the answer.
+    pub fn took_resume(&self) -> bool {
+        self.resumed.swap(false, Ordering::SeqCst)
     }
 
     /// Throws away the held connection and dials again.
